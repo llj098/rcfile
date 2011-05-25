@@ -17,9 +17,9 @@
 $
 
 # Command Line History (newest to oldest):
-:q
 :wq
 :w
+:q
 :e ~/.zshrc
 :set tags
 :tags
@@ -873,7 +873,7 @@ $
 "0	LINE	0
 	sudo cp -r .bash* ~/rc/
 ""1	LINE	0
-	
+	git push
 "2@	LINE	0
 	
 "3	LINE	0
@@ -881,38 +881,39 @@ $
 "4	LINE	0
 	
 "5	LINE	0
-			int sum = (int) Evaluator.Evaluate ("1+2");
+	
 "6	LINE	0
-			// We know the result is an IEnumerator, cast it.
+	
 "7	LINE	0
-			Evaluator.Run ("var numbers = new int [] {1,2,3,4,5};");
+			int sum = (int) Evaluator.Evaluate ("1+2");
 "8	LINE	0
-			Evaluator.Run ("using System.Linq");
+			// We know the result is an IEnumerator, cast it.
 "9	LINE	0
-			// A more interesting sample
+			Evaluator.Run ("var numbers = new int [] {1,2,3,4,5};");
 "f	LINE	0
 	extern int send_sig_info(int, struct siginfo *, struct task_struct *);
 "k	CHAR	0
 	k
 "-	CHAR	0
-	bash
+	sh ~/script/syncrc.sh 
 
 # File marks:
-'0  1  0  ~/script/syncrc.sh
-'1  1  0  ~/.zshrc
-'2  315  8  ~/Source/mono/mcs/mcs/driver.cs
-'3  16  0  ~/code/test/eval.cs
-'4  11  0  ~/code/test/eval.cs
-'5  90  0  ~/Source/mono/mcs/INSTALL.txt
-'6  178  0  ~/.xmonad/xmonad.hs
-'7  174  0  ~/.xmonad/xmonad.hs
-'8  423  0  ~/Source/beansdb-0.5.3/bitcask.c
-'9  1  0  ~/Source/beansdb-0.5.3/bitcask.c
+'0  8  0  ~/script/syncrc.sh
+'1  1  0  ~/script/syncrc.sh
+'2  1  0  ~/.zshrc
+'3  315  8  ~/Source/mono/mcs/mcs/driver.cs
+'4  16  0  ~/code/test/eval.cs
+'5  11  0  ~/code/test/eval.cs
+'6  90  0  ~/Source/mono/mcs/INSTALL.txt
+'7  178  0  ~/.xmonad/xmonad.hs
+'8  174  0  ~/.xmonad/xmonad.hs
+'9  423  0  ~/Source/beansdb-0.5.3/bitcask.c
 
 # Jumplist (newest first):
--'  1  0  ~/script/syncrc.sh
+-'  8  0  ~/script/syncrc.sh
 -'  1  0  ~/script/-TabBar-
 -'  2  0  ~/script/-TabBar-
+-'  1  0  ~/script/syncrc.sh
 -'  1  0  ~/.zshrc
 -'  42  0  ~/.zshrc
 -'  506  0  ~/.zshrc
@@ -1004,16 +1005,13 @@ $
 -'  148  13  ~/.zshrc
 -'  144  13  ~/.zshrc
 -'  392  0  ~/.zshrc
--'  87  0  ~/.zshrc
--'  1139  49  ~/Source/redis/src/redis.c
--'  181  15  ~/Source/redis/src/redis.c
 
 # History of marks within files (newest to oldest):
 
 > ~/script/syncrc.sh
-	"	1	0
-	^	4	15
-	.	1	0
+	"	8	0
+	^	4	13
+	.	4	12
 	+	6	0
 	+	2	0
 	+	3	0
@@ -1024,10 +1022,19 @@ $
 	+	1	0
 	+	4	14
 	+	1	0
+	+	2	0
+	+	6	8
+	+	9	8
+	+	9	0
+	+	1	12
+	+	2	12
+	+	3	12
+	+	4	12
 
 > ~/script/-TabBar-
 	"	1	0
 	.	2	0
+	+	2	0
 	+	2	0
 
 > ~/Source/NERD_tree_1
