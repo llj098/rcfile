@@ -1,0 +1,5 @@
+ls
+source .zshrc
+ls
+ls
+exit

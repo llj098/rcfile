@@ -1,0 +1,615 @@
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/slab.h>
+#include <linux/kthread.h>
+#include <linux/list.h>
+#include <linux/kfifo.h>
+
+#include <linux/errno.h>
+#include <linux/types.h>
+
+#include <linux/netdevice.h>
+#include <linux/ip.h>
+#include <linux/in.h>
+
+#include <linux/smp_lock.h>
+#include <linux/rbtrees.h>
+#include <linux/delay.h>
+#include <linux/un.h>
+#include <linux/unistd.h>
+#include <linux/wait.h>
+#include <linux/ctype.h>
+#include <asm/unistd.h>
+#include <net/sock.h>
+#include <net/tcp.h>
+#include <net/inet_connection_sock.h>
+#include <net/request_sock.h>
+
+#define DEFAULT_PORT 2325
+#define CONNECT_PORT 23
+#define MODULE_NAME "ktcp"
+#define INADDR_SEND INADDR_LOOPBACK
+#define RECV_BUFFER_SIZE 32*1024
+
+static atomic_t revc_count;
+static atomic_t send_count;
+
+struct ktcp_service
+{
+	int running;
+	struct socket *listen_socket;
+	struct task_struct *thread;
+	struct task_struct *accept_worker;
+	struct kmem_cache *recv_cache;
+};
+
+struct ktcp_cl_conn_s {
+	struct list_head rdllink; /*ready list*/
+	struct list_head list;
+	struct socket *sock;
+	u32 active_jfs; /*last active jiffies*/
+	u32 conn_jfs; /*connection create jiffies*/
+	wait_queue_t wait;
+	atomic_t rd_state; /*0 not in the queue,1 in the ready queue*/
+	atomic_t priorty;
+	struct rb_node rbn;/*RB Tree node*/
+	struct task_struct *recv_worker;
+	void (*handler)(struct ktcp_cl_conn_s *);
+	char *recv_buffer;
+	u32 recv_index;/* TODO: how to determine the recv policy */
+};
+
+static struct ktcp_recv_worker_s ktcp_conn_list_header;
+
+struct ktcp_recv_worker_s {
+	u8 id;
+	struct list_head list;
+	atomic_t conn_count;
+	struct task_struct *task;
+	struct kfifo rdquque;
+	/*RB tree root to store the ktcp_cl_conn_s*/
+	struct rb_root rbr;
+	spinlock_t list_lock;
+} ktcp_recv_workers_head;
+
+struct ktcp_rcv_wq_private{
+	struct task_struct *task;
+	struct socket *sock;
+};
+
+struct ktcp_service *ktcp_svc;
+
+/* Compare RB tree keys */
+static inline int ktcp_cmp_conn(struct ktcp_cl_conn_s *c1,
+		struct ktcp_cl_conn_s *c2)
+{
+	return (p1->sock > p2->sock ? +1:
+			(p1->sock < p2->sock) > -1 : p1->uid - p2->uid);
+}
+
+static void ktcp_rb_conn_insert()
+{
+	/*TODO*/
+}
+
+static int ktcp_recv_worker_func()
+{
+	struct ktcp_recv_worker_s *worker = container_of(current,struct ktcp_recv_worker_s,task);
+	if(IS_ERR(worker)){
+		printk(KERN_ERR "Cannot get the recv worker from _current_ process\n");
+		return -1;
+	}
+
+	do {/*do recv work */
+		struct ktcp_cl_conn_s *cl_conn;
+		if(kfifo_out(worker->rdquque,cl_conn,sizeof(*cl_conn))) {
+
+			if(IS_ERR(cl_conn->recv_buffer))
+				cl_conn->recv_buffer = (char *)kmem_cache_zalloc(ktcp_svc->recv_cache,GFP_ATOMIC);
+			else /* TODO:we should not be such rude */
+				memset(cl_conn->recv_buffer,0,RECV_BUFFER_SIZE);
+
+			if(ktcp_recv(cl_conn->sock, cl_conn->recv_buffer,
+						RECV_BUFFER_SIZE , MSG_DONTWAIT) >0)
+				cl_conn->handler(cl_conn);
+		}
+		else{ /*sleep*/
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule();
+			set_current_state(TASK_RUNNING);
+		}
+
+	} while (!kthread_should_stop());
+
+	return 1;
+}
+
+static int ktcp_init_recv_worker()
+{
+	int err,i=0;
+	int core_count = num_online_cpus();
+
+	/*init the recv workers*/
+	INIT_LIST_HEAD(&ktcp_recv_workers_head.list);
+	spin_lock_init(&worker->list_lock);
+	for (i = 0; i < core_count; i++) {
+		struct ktcp_recv_worker_s *worker = kmalloc(sizeof(*worker),GFP_KERNEL);
+		worker->task = kthread_run(ktcp_recv_worker_func,(void*)NULL,"krecv wrk #%d",i);
+		worker->id = i;
+		worker->rbr=RB_ROOT;
+		kfifo_alloc(&worker->rdquque,PAGE_SIZE,GFP_KERNEL);
+		if(err!=0) {
+			printk("ERROR:alloc the kfifo for the recv worker ERROR\n");
+		}
+
+		list_add_tail(&worker->list,&ktcp_recv_workers_head.list);
+	}
+
+	/*init the conn list*/
+	INIT_LIST_HEAD($ktcp_conn_list_header.list);
+
+	return 1;
+}
+
+static int ktcp_recv_callback(wait_queue_t *wait, unsigned mode, int wake_flags, void *key) 
+{
+	struct ktcp_cl_conn_s *cl_conn = container_of(wait,struct ktcp_cl_conn_s, wait);
+	if(IS_ERR(cl_conn)) {
+		printk("ERROR: Cannot get the Connection from wait\n");
+		return -1;
+	}
+
+	/*Update the connection's activity fields*/
+	cl_conn->active_jfs=jiffies;
+
+	/*the listen_socket is here too*/
+	if(cl_conn->sock == ktcp_svc->listen_socket) { /* Do Accept */
+		const char *what;
+		int error;
+		struct socket *cscok;
+		errpr=ktcp_accept(socket,&cscok,&what);
+		if(error<0){
+			printk("%s\n",what);
+			return;
+		}
+		/*init the client connection struct*/
+		struct ktcp_cl_conn_s *cl_conn = ktcp_cl_conn_create(cscok);
+		add_wait_queue(sk_sleep(cscok->sk), &cl_conn->wait);
+	}
+	else {
+		/* 
+		 * RECEIVE:
+		 * - If the connection has no recv worker, assign one
+		 * - Check if the conn was in the ready queue,if not queue it 
+		 * - Try to wake up the recv worker	 
+		 * - Update the recv worker's activity fields
+		 */
+		struct ktcp_recv_worker_s *worker_target;
+		if(!cl_conn->recv_worker) { /*assign a recv worker*/
+
+			u32 min = 1<<31;
+			struct task_struct *task;
+
+			list_for_each_entry(task,&ktcp_recv_workers_head.list,list){
+
+				struct ktcp_recv_worker_s *worker = container_of(task,struct ktcp_recv_worker_s,task);
+				if(!IS_ERR(worker)) {
+					if(atomic_read(worker->conn_count) < min) {
+						min = atomic_read(worker->conn_count);
+						worker_target = worker;
+					}
+				}
+				else{
+					printk(KERN_ERR "ERROR:Cannot get the worker from the task\n");
+					ktcp_cl_conn_release(cl_conn);
+					return -1;
+				}
+			}
+
+			if(IS_ERR(worker_target)) {
+				printk(KERN_ERR "ERROR:can not get a recv worker\n");
+				ktcp_cl_conn_release(cl_conn);
+				return -1;
+			}
+		}
+
+		if(atomic_read(cl_conn->rd_state) == 0) { /*not in the ready queue*/
+			if(kfifo_in(&worker_target->rdquque,(void*)cl_conn,sizeof(*cl_conn))) {
+				atomic_set(cl_conn->rd_state,1);
+				atomic_inc(worker_target->conn_count);
+				wake_up_process(worker_target->task);
+			}
+			else{
+				/* 
+				 * if we could not add the conn to the worker's
+				 * reday queue, add it to the rescue queue
+				 */
+				ktcp_cl_conn_rescue(cl_conn);
+			}
+		}
+		else if(atomic_read(cl_conn->rd_state) == 1) { 
+			/*
+			 * TODO: 
+			 * !!We should make sure that wether the socket could wake up many times..
+			 *
+			 * in the ready queue already, increase its priorty
+			 * but we ignore priorty field now... 
+			 */
+			atomic_inc(&cl_conn->priorty);
+		}
+		else{ /*do nothing*/ }
+	}
+
+	return 1;
+}
+
+int ktcp_cleanup_recv_worker()
+{
+	struct ktcp_recv_worker_s *w;
+	list_for_each_entry(w,&ktcp_recv_workers_head.list,list) {
+		kthread_stop(w->task);
+	}
+}
+
+/*
+ * if we Cannot add the connection to recv worker's ready queue
+ * we should add the connection to the rescue queue,
+ * so we won't lose the connection Because of the receive 
+ * worker's queue is full.
+ *
+ * We default the certain(or configured) length of the rescure 
+ * queue,if the it's full,we should DOS.
+ */
+void ktcp_cl_conn_rescue(struct ktcp_cl_conn_s *cl_conn)
+{
+	/*TODO:NOT implementation*/
+}
+
+void ktcp_cl_conn_release(struct ktcp_cl_conn_s *cl_conn)
+{
+	sock_release(cl_conn->sock);
+	kmem_cache_free(ktcp_svc->recv_cache,cl_conn->recv_buffer);
+	kfree(cl_conn);
+	cl_conn = NULL;
+}
+
+struct *ktcp_cl_conn_s ktcp_cl_conn_create(struct socket *cscok)
+{
+	struct ktcp_cl_conn_s *cl_conn = kmalloc(sizeof(*cl_conn),GFP_KERNEL);
+	cl_conn->active_jfs = jiffies;
+	cl_conn->conn_jfs = jiffies;
+	cl_conn->sock=csock;
+	cl_conn->handler=ktcp_conn_handler_simple;
+
+	/* 
+	 * Add the conn to the conn list for the check thread to maintain.
+	 * NOTE: Maybe we need a RB tree here
+	 */
+
+	spin_lock(&ktcp_conn_list_header.list_lock);
+	list_add_tail(&cl_conn->list,&ktcp_conn_list_header.list);
+	spin_unlock(&ktcp_conn_list_header.list_lock);
+	/*add the wait filed to the client socket wait queue*/
+	init_waitqueue_func_entry(&cl_conn->wait,ktcp_recv_callback);
+
+	return cl_conn;
+}
+
+static void ktcp_conn_handler_simple(struct ktcp_cl_conn_s *cl_conn)
+{
+	/* TODO */
+}
+
+int ktcp_listen()
+{
+	int error;
+	struct socket *socket;
+	struct sockaddr_in sin,sin_send;
+	error = sock_create_kern(PF_INET,SOCK_STREAM,IPPROTO_TCP,&ktcp_svc->listen_socket);
+	if(error<0) { printk(KERN_ERR "CREATE SOCKET ERROR"); return -1; } 
+
+	socket = ktcp_svc->listen_socket;
+	ktcp_svc->listen_socket->sk->sk_reuse=1;
+
+	sin.sin_addr.s_addr=htonl(INADDR_ANY);
+	sin.sin_family=AF_INET;
+	sin.sin_port=htons(DEFAULT_PORT);
+
+	error = socket->ops->bind(socket,(struct sockaddr*)&sin,sizeof(sin));
+	if(error<0) {
+		printk(KERN_ERR "BIND ADDRESS");
+		return -1;
+	}
+
+	error = socket->ops->listen(socket,5);
+	if(error<0) {
+		printk(KERN_ERR "LISTEN ERROR");
+		return -1;
+	}
+
+	ktcp_cl_conn_s *cl_conn = ktcp_cl_conn_create(socket);
+	add_wait_queue(sk_sleep(socket->sk), &cl_conn->wait);
+
+	return 1;
+}
+
+int ktcp_accept(struct socket *sock,struct **newsock,
+		const char **what)
+{
+	struct sock *sk = sock->sk;
+	int err = 0;
+
+	*what = "listen";
+	err = sock->ops->listen(sock, 5);
+	if (err < 0)
+		goto out;
+
+	*what = "sock_create_lite";
+	err = sock_create_lite(sk->sk_family, sk->sk_type, sk->sk_protocol,
+			newsock);
+	if (err < 0)
+		goto out;
+
+	*what = "accept";
+	err = sock->ops->accept(sock, *newsock, 0);
+	if (err < 0) {
+		sock_release(*newsock);
+		*newsock = NULL;
+		goto out;
+	}
+	(*newsock)->ops  = sock->ops;
+
+out:
+	return err;
+}
+
+int ktcp_recv(struct socket *sock,unsigned char *buf,int len,unsigned int flag) 
+{
+	if(sock==NULL) {
+		printk("krecv the cscok is NULL\n");
+		return -1;
+	}
+	else {
+		printk("krecv.the csock is:%d,%d\n",(int)sock,ktcp_svc->listen_socket);
+	}
+
+	printk("Test the cscok:%d \n",sock->sk->sk_rmem_alloc);
+	printk(KERN_INFO "ktcp_recv");
+	struct msghdr msg;
+	struct iovec iov;
+	mm_segment_t oldfs;
+	int size=0;
+
+	if(sock->sk==NULL) return -1;
+
+	iov.iov_base=buf;
+	iov.iov_len=len;
+
+	msg.msg_control=NULL;
+	msg.msg_controllen=0;
+	msg.msg_flags=0;
+	msg.msg_name=0;
+	msg.msg_namelen=0;
+	msg.msg_iov=&iov;
+	msg.msg_iovlen=1;
+
+	oldfs=get_fs();
+	set_fs(KERNEL_DS);
+	printk(KERN_INFO "ktcp_recv.sock_recvmsg");
+	size=sock_recvmsg(sock,&msg,len,flag);
+	printk(KERN_INFO "ktcp_recved");
+	set_fs(oldfs);
+
+	printk("the message is : %s\n",buf);
+	atomic_inc(&revc_count);
+
+	return size;
+}
+
+int ktcp_send(struct socket *sock,char *buf,int len) 
+{
+	printk(KERN_INFO "ktcp_send");
+	if(sock==NULL)
+	{
+		printk("ksend the cscok is NULL\n");
+		return -1;
+	}
+	struct msghdr msg;
+	struct iovec iov;
+	int size;
+	mm_segment_t oldfs;
+
+	iov.iov_base=buf;
+	iov.iov_len=len;
+
+	msg.msg_control=NULL;
+	msg.msg_controllen=0;
+	msg.msg_flags=0;
+	msg.msg_iov=&iov;
+	msg.msg_iovlen=1;
+	msg.msg_name=0;
+	msg.msg_namelen=0;
+
+	oldfs=get_fs();
+	set_fs(KERNEL_DS);
+	printk(KERN_INFO "ktcp_send.sock_sendmsg");
+	size=sock_sendmsg(sock,&msg,len);
+	printk(KERN_INFO "message sent!");
+	set_fs(oldfs);
+
+	atomic_inc(&send_count);
+
+	return size;
+}
+
+int ktcp_connect()
+{
+	int err;
+	struct socket *conn_sock;
+	err = sock_create(PF_INET,SOCK_STREAM,IPPROTO_TCP,&conn_sock);
+
+	if (err) {
+		/*printk("%s: failed to create a socket: family: %d, type: %d, proto: %d, err: %d.\n",*/
+				/*__func__, ctl->addr.sa_family, ctl->type, ctl->proto, err);*/
+		/*goto err_out_exit;*/
+	}
+
+	err = kernel_connect(conn_sock, (struct sockaddr *)&ctl->addr, ctl->addrlen, 0);
+	if (err) {
+		/*printk("%s: failed to connect to server: idx: %u, err: %d.\n",*/
+				/*__func__, st->psb->idx, err);*/
+		/*goto err_out_release;*/
+	}
+
+	return 0;
+}
+
+int ktcp_accept_worker()
+{
+	/*
+	 * In the accept_worker function, we accept the socket Connection
+	 * and initialize the Client Connection Struct
+	 */
+
+	printk("accept_worker fired!\n");
+	int error,ret;
+	struct socket *socket;
+	struct socket *cscok;
+	int len=10;
+	unsigned char buf[len+1];
+
+	printk("declare the wait queue in the accept_worker\n");
+	DECLARE_WAITQUEUE(wait,current);
+
+	ktcp_svc->running = 1;
+	socket = ktcp_svc->listen_socket;
+	printk("Create the client accept socket\n");
+	printk("accept_worker.the cscok is :%d,%d\n",cscok,ktcp_svc->listen_socket);
+
+	/*check the accept queue*/
+	/*TODO: Because the api changes, should change to the new API*/
+	struct inet_connection_sock *isock = inet_csk(socket->sk);
+	while (ktcp_svc->running == 1 && !kthread_should_stop()) {
+		/*if(socket->sk->tp_pinfo.af_tcp.accept_queue==NULL) {*/
+		/*if(skb_queue_empty(&socket->sk->sk_receive_queue)){*/
+		if(reqsk_queue_empty(&isock->icsk_accept_queue)){
+			/*printk("%s\n","the receive queue is NULL,so sleep");*/
+			add_wait_queue(sk_sleep(socket->sk), &wait);
+			__set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(HZ);
+			printk("icsk queue empty?: %d\n",reqsk_queue_empty(&isock->icsk_accept_queue));
+			printk("recv queue empty?: %d\n",skb_queue_empty(&socket->sk->sk_receive_queue));
+			/*printk("icsk queue lenth: %d\n",reqsk_queue_len(&isock->icsk_accept_queue));*/
+			__set_current_state(TASK_RUNNING);
+			remove_wait_queue(&socket->sk->sk_wq->wait, &wait);
+			continue;
+		}
+
+		printk("create the receive socket\n");
+		error = sock_create(PF_INET,SOCK_STREAM,IPPROTO_TCP,&cscok);
+		if(error<0) {
+			printk(KERN_ERR "CREATE CSOCKET ERROR");
+			return error;
+		}
+
+		printk("do accept non_block\n");
+		ret = socket->ops->accept(socket,cscok,O_NONBLOCK);
+		if(ret<0){
+			printk("accept error,release the socket\n");
+			sock_release(cscok);
+			return ret;
+		}
+
+		/*init the client connection struct*/
+		struct ktcp_cl_conn_s *cl_conn = ktcp_cl_conn_create();
+		add_wait_queue(sk_sleep(cscok->sk), &cl_conn->wait);
+
+
+		/*receive*/
+		memset(&buf,0,len+1);
+		printk("do receive the package\n");
+		int t=0;
+		t = ktcp_recv(cscok,buf,len,MSG_DONTWAIT);
+		printk("t is : %d\n",t);
+		if(t>0) {
+			/*ktcp_send*/
+			memset(&buf, 0, len+1);
+			strcat(buf, "testing...");
+			printk("do send the package\n");
+			ktcp_send(cscok,buf,strlen(buf));
+			/*printk("the t is %d\n",t);*/
+		}
+	}
+
+	return ret;
+}
+
+int ktcp_start()
+{
+	int error;
+	ktcp_svc->running = 1;
+
+	/* kernel thread initialization */
+	ktcp_svc->recv_cache = kmem_cache_create("KTCP_RECV_CACHE", 
+			RECV_BUFFER_SIZE,
+			0,
+			SLAB_HWCACHE_ALIGN,
+			NULL);
+
+	error = ktcp_init_recv_worker();
+	if(error<0) {
+		return -1;
+	}
+	error = ktcp_listen();
+	if(error<0) {
+		return -1;
+	}
+
+	return 1;
+}
+
+int init_module()
+{
+	printk("ktcp module init\n");
+	printk("core count:%d\n",num_online_cpus());
+	ktcp_svc=kmalloc(sizeof(struct ktcp_service),GFP_KERNEL);
+	ktcp_start();
+	return 1;
+}
+
+void cleanup_module()
+{
+	int err;
+
+	printk("module cleanup\n");
+	if(ktcp_svc->thread==NULL)
+		printk(KERN_INFO MODULE_NAME": no kernel thread to kill\n");
+	else{
+		lock_kernel();
+		{
+			printk("stop the thead\n");
+			err=kthread_stop(ktcp_svc->thread);
+			printk("stop the accept_worker\n");
+			err=kthread_stop(ktcp_svc->accept_worker);
+		}
+		unlock_kernel();
+
+		/* free allocated resources before exit */
+		if (ktcp_svc->listen_socket!= NULL) 
+		{
+			printk("release the listen_socket\n");
+			sock_release(ktcp_svc->listen_socket);
+			ktcp_svc->listen_socket= NULL;
+		}
+
+		ktcp_cleanup_recv_worker();
+
+		kmem_cache_destroy(ktcp_svc->recv_cache);
+
+		kfree(ktcp_svc);
+		ktcp_svc = NULL;
+
+		printk(KERN_INFO MODULE_NAME": module unloaded\n");
+	}
+}

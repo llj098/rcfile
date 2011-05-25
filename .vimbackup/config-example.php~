@@ -1,0 +1,10 @@
+<?php
+define('OAUTH_KEY','Y7rcjO9wMUZyBfhYBfgKow');
+define('OAUTH_SECRET','3Xj8wki5MG1hrZppc1R6ZJaNZdxp2UJJ8A7s772E');
+define('BASE_URL','');
+define('API_VERSION','1');
+define('DEBUG',FALSE);
+define('DOLOG',FALSE);
+define('COMPRESS',FALSE);
+?>
+

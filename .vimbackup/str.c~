@@ -1,0 +1,57 @@
+
+#include<stdio.h>
+#include<string.h>
+#include <arpa/inet.h>
+
+int 
+main()
+{
+	/*char *src = "hello world";*/
+	/*char *dst = malloc(5);*/
+	/*strncpy(dst,src+5,5);*/
+	/*printf("%s",dst);*/
+	/*char *ipa = "192.168.1.1";*/
+	/*[>kvs_ip_addr_to_int(&ipa);<]*/
+
+	/*char *id;*/
+	/*char *p = "192.168.2.1";*/
+
+	/*while((id=strsep(&p,".")))*/
+	/*{*/
+		/*printf("%s\n",id);*/
+	/*}*/
+
+	char *p,*str;
+	str = strdup("haha@23");
+	p=strsep(&str,"@");
+	printf("%s\n",p);
+
+	unsigned int ret = 0;
+	ret = tt("192.168.2.2");
+
+	printf("%u\n",ret);
+
+
+	unsigned int s =192;
+
+
+}
+
+int tt(char *ip)
+{
+	unsigned int ret=0,i;
+	char *p,*s;
+	s = strdup(ip);
+
+	for (i = 0; i < 4; i++) {
+		if((p=strsep(&s,"."))) {
+			unsigned int tmp = strtol(p,NULL,10);
+			ret = ret | tmp<<(8*(3-i));
+			printf("%u,%u,%u\n",ret,tmp,192<<24);
+		}
+		else
+			return 0;
+	}
+
+	return ret;
+}

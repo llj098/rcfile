@@ -1,0 +1,43 @@
+#rule = [pattern|hash|content] [url|header value] [server-ip server-ip-range|server-index index-range] 
+#HDS
+Service HDS{
+    listen = 0.0.0.0:8000
+    scheduler = chttp
+    #startservers = 8
+    #maxclients = 256
+    #minspareservers = 6
+    #maxspareservers = 18
+    #redirect = localhost:80
+    server = range 192.168.3.1:80-192.168.3.10:80
+	rule = pattern url "/image/*" server-ip 192.168.3.1:80-192.168.3.5:80
+	rule = pattern url "/handlers/*" server-ip 192.168.3.6:80-192.168.3.10:80
+}
+
+#MAP
+Service MAP{
+    listen = 0.0.0.0:8003
+    scheduler = chttp
+    #startservers = 8
+    #maxclients = 256
+    #minspareservers = 6
+    #maxspareservers = 18
+    #redirect = localhost:80
+    server = 192.168.3.15:8001 - 192.168.3.25:8003
+	rule = hash header "pragma" server-index 0-10 #index order by ipaddress order
+	rule = content header "server-id" server-index headers:server-id
+}
+
+#JAS
+Service JAS{
+    listen = 0.0.0.0:8005
+    scheduler = chttp
+    startservers = 8
+    maxclients = 256
+    minspareservers = 6
+    maxspareservers = 18
+    redirect = localhost:80
+    server = localhost:www 100
+    rule = pattern ".*" use server localhost:www
+	rule = pattern "/image/*" use server 192.168.123.123:8000
+}
+

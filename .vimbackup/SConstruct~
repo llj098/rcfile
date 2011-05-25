@@ -1,0 +1,2 @@
+env = Environment()
+env.Program(target='bar', source=['parser.c','list.h'])

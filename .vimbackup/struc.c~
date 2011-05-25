@@ -1,0 +1,12 @@
+#include <stdio.h>
+
+struct struc_t {
+	int a;
+	char *b
+}ss;
+
+
+int main()
+{
+	printf("%d\n",ss.a);
+}

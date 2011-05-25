@@ -1,0 +1,25 @@
+# Sample minimal config file.  Copy this to ~/.offlineimaprc and edit to
+# suit to get started fast.
+
+[general]
+accounts = llj098
+
+[Account llj098]
+localrepository = Local
+remoterepository = Remote
+autorefresh = 5
+quick = 10
+holdconnectionopen = yes
+keepalive = 60
+
+[Repository Local]
+type = Maildir
+localfolders = /data/mail
+
+[Repository Remote]
+type = IMAP
+remotehost = imap.gmail.com
+remoteuser = llj098@gmail.com
+remotepass = PrayForWen
+ssl = yes
+maxconnections = 1

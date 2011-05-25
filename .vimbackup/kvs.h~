@@ -1,0 +1,90 @@
+#ifndef _KVS_H
+#define _KVS_H
+
+struct kvs_svc_item {
+	struct list_head list;
+	__u16 port; /*svc listen port*/
+	char *svc_name; /*service name*/
+	char *svc_desc; /*svc descriptor*/
+	char *svc_sche_name;
+	struct kvs_scheduler *scheduler;
+	struct kvs_svc_svr *servers;
+	struct kvs_svc_rules *rules;
+	atomic_t conn_count;
+	atomic_t parse_ok;
+	atomic_t parse_error;
+}; /*service item */
+
+struct kvs_svc_rules{
+	struct list_head list;
+	char *method;
+	int url; /*schedule by url or header ?*/
+	char *field_value; 
+	struct kvs_svc_svr *servers; /* find by ipaddress or index*/
+	struct kvs_scheduler *scheduler; /*find by scheduler name */
+	struct kvs_svc_item *svc; /*service item*/
+	int index;
+}
+
+struct kvs_svc_svr {
+	struct kvs_svc_item *svc;
+	struct list_head list;
+	__u32 ip_addr;
+	__u32 last_ping_time;
+	__u32 last_work_time;
+	atomic_t svr_conn_count;
+	int svr_ok;
+};/* server item for each service */
+
+struct kvs_scheduler {
+	struct list_head list;
+	char *name;
+	int (*schedule) (struct kvs_svc_item *svc,struct kvs_conn *conn);
+};/*scheduler structure*/
+
+struct kvs_conn {
+	__u32 dest_ip_addr;
+	__u32 src_ip_addr;
+	__u16 dest_port;
+	__u16 src_port;
+	struct sock *client_sock;
+	struct sock *server_sock;
+	struct kvs_svc_item *svc;
+	struct kvs_svc_svr *dest_svr;
+};
+
+struct kvs_sched_dest {
+	__u32 ip_addr;
+	__u16 port;
+	struct kvs_svc_svr *svr;
+};/* the result of the scheduler*/
+
+struct kvs_vs_struct {
+	atomic_t vs_conn_cout;
+	atomic_t vs_parse_ok_count;
+	atomic_t vs_parse_error_count;
+	int kvs_scheduler_count;
+	struct kvs_scheduler *schedulers;
+	struct kvs_svc_item *services;
+};
+
+struct kvs_vs_ha{
+	
+};
+
+enum kvs_schd_field{
+	url,
+	header
+};
+
+extern int kvs_scheduler_register(struct kvs_scheduler *scheduler);
+extern int kvs_scheduler_lcc(struct kvs_svc_item *svc,struct kvs_conn *conn);
+extern int kvs_scheduler_content(struct kvs_svc_item *svc,struct kvs_conn *conn);
+
+
+/*helper.c*/
+
+extern int kvs_addr_to_str(char* ip);
+
+
+#endif

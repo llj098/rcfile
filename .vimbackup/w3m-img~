@@ -1,0 +1,4 @@
+#!/bin/sh
+echo \<img src="\"$1\"" \\\> > ${1}.html
+w3m ${1}.html
+rm ${1}.html

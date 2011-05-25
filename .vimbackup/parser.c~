@@ -1,0 +1,255 @@
+/*TODO:Limit the length of each header*/
+#include <stdio.h>
+#include <time.h>
+#include "list.h"
+
+#define CR 13
+#define LF 10
+#define SP ' '
+#define HT 9
+#define DOUBLE_QUOTE 34
+#define COLON ':'
+#define HTTP_VERSION_1_1 "1.1"
+#define HTTP_VERSION_1 "1"
+#define HTTP_PARSE_OK 1
+#define HTTP_PARSE_ERROR -1
+
+/*#define INIT_HTTP_REQUEST(r) \*/
+	/*struct http_request *r = malloc(sizeof(struct http_request));*/
+
+/*#define INIT_HTTP_PARSE(p,r) \*/
+	/*struct http_parse p;	\*/
+	/*parse.total_length=strlen(REQUEST)+1; \*/
+	/*parse.parse_index=0; 	\*/
+	/*parse.request=req; 		\*/
+	/*parse_request_line(&parse,REQUEST);*/
+
+const char HTTP_200[] =
+"HTTP/1.0 200 OK\r\n"
+"Cache-Control: no-cache\r\n"
+"Connection: close\r\n"
+"Content-Type: text/html\r\n"
+"\r\n"
+"<html><body><h1>200 OK</h1>\nHAProxy: service ready.\n</body></html>\n";
+
+
+const char REQUEST[] = "GET index.aspx HTTP/1.1\r\nHOST:feinno.com\r\n";
+
+struct request_line{
+	char *version;
+	char *method;
+};
+
+struct http_request{
+	struct http_request_line *request_line;
+	struct http_general_header *headers;
+	struct http_cookie_header *cookies;
+};
+
+/*enum http_version{*/
+/*HTTP_VERSION_1_1,*/
+/*HTTP_VERSION_1*/
+/*};*/
+
+struct http_request_line{
+	char *method;
+	char *uri;
+	char *version;
+};
+
+struct http_general_header{
+	struct list_head list;
+	char *name;
+	char *value;
+};
+
+struct http_cookie_header{
+	struct list_head;
+	char *key;
+	char *value;
+};
+
+struct http_parse{
+	struct http_request *request;
+	int parse_index; 
+	int total_length;
+};
+
+/*
+ * Parse the http request line
+ *
+ * According to rfc 2616
+ * section 5.1
+ * Request-Line  = Method SP Request-URI SP HTTP-Version CRLF
+ */
+
+	int 
+parse_request_line(struct http_parse *parse,
+		char *request)
+{
+	int current_state = 0;
+	int index = parse->parse_index;
+	struct http_request_line 
+		*request_line = parse->request->request_line;
+
+	int i = 0;
+	for (i = parse->parse_index; i <  parse->total_length; i++) {
+		/*TODO:Limit the length of each header*/
+		
+		/*printf("state:%d,index:%d,i:%d\n",current_state,index,i);*/
+		if(request[i]==SP||
+				(current_state==2&&request[i]==CR))
+		{
+			printf("SP\n");
+			switch(current_state){
+				case 0 : /*method*/
+					printf("%s,i:%d,index:%d\n","method",i,index);
+					request_line->method = (char*)malloc(i-index+1);  
+					memset(request_line->method,0,i-index+1);
+					strncpy(request_line->method,request + index, i-index);
+					index = i;
+					current_state ++;
+					index++;
+					break;
+				case 1: /*uri*/
+					request_line->uri = malloc(i-index+1);
+					memset(request_line->uri,0,i-index+1);
+					strncpy(request_line->uri,request + index, i-index);
+					index = i++;
+
+					current_state ++;
+					index++;
+					/*printf("hehe,%d,%d,%d\n",current_state,index,i);*/
+					break;
+				case 2: /*version*/
+					request_line->version = malloc(i-index+1);
+					memset(request_line->version,0,i-index+1);
+					strncpy(request_line->version,request + index, i-index);
+					index = i;
+					current_state ++;
+					break;
+				default:
+					break;
+			}
+		}
+
+		if(request[i]==CR && i + 1 < parse->total_length 
+				&& request[i + 1]==LF)
+		{
+			current_state++;
+			index+=2;
+		}
+
+		if(current_state >= 3) {
+			parse->parse_index = index;
+			return HTTP_PARSE_OK;
+		}
+	}
+
+	return HTTP_PARSE_ERROR;
+}
+
+	int 
+parse_cookie_header(struct http_parse **parse,char **request)
+{
+	return HTTP_PARSE_OK;
+}
+
+/*
+ * Parse the http request headers
+ *
+ *
+ * In rfc 2616,there are three kinds of http headers.
+ * We handle it simply,only two kinds: genernal and cookie.
+ * The General one is nama:value format
+ * The Cookie is key:value;key:value
+ */
+	int 
+parse_gernel_header(struct http_parse *parse,char *request)
+{
+	int current_state = 0;
+	int index = parse->parse_index;
+
+	struct http_general_header *header = malloc(sizeof(struct http_general_header));
+
+	int i = index;
+	printf("parse header,i:%d,total_length:%d\n",i,parse->total_length);
+	for (;i< parse->total_length; i++) {
+		switch(current_state)
+		{
+			case 0:
+				printf("state:%d,index:%d,i:%d\n",current_state,index,i);
+				/*TODO.*/
+				if(request[i]==CR||request==LF)
+					return HTTP_PARSE_ERROR;
+
+				if(request[i]==COLON)
+				{
+					header->name = malloc(i-index+1);
+					memset(header->name,0,i-index+1);
+					strncpy(header->name,request + index, i-index);
+					index = ++i;
+					current_state ++;
+				}
+				break;
+			case 1:
+				printf("state:%d,index:%d,i:%d,is cr:%d\n",current_state,index,i,request[i]);
+				if(request[i]==CR && i + 1 < parse->total_length 
+						&& request[i + 1]==LF)
+				{
+					header->value = malloc(i-index);
+					strncpy(header->value,request + index, i-index);
+
+					current_state++;
+					index+=2;
+					parse->parse_index = index;
+
+					/*TODO:handle cookie*/
+					printf("%s\n","Add to headers");
+					list_add_tail(&parse->request->headers->list,&header->list);
+					return HTTP_PARSE_OK;
+				}
+				break;
+			default:
+				return HTTP_PARSE_ERROR;
+				break;
+		}
+	}
+
+	return HTTP_PARSE_ERROR;
+}
+
+int main()
+{
+	time_t   timep; 
+	time   (&timep); 
+	printf( "%s\n",ctime(&timep)); 
+	int i=0;
+
+	/*for (i = 0; i < 10000000; i++) {*/
+	struct http_request_line *line = malloc(sizeof(struct http_request_line));
+	struct http_request *req = malloc(sizeof(struct http_request));
+	struct http_general_header *header = malloc(sizeof(struct http_general_header));
+	struct http_parse parse;  
+	parse.total_length=strlen(REQUEST)+1;
+	parse.parse_index=0;
+	parse.request=req;
+	req->request_line = line;
+	INIT_LIST_HEAD(&header->list);
+	req->headers=header;  
+
+	printf("%d\n",' ');
+	parse_request_line(&parse,REQUEST);
+	parse_gernel_header(&parse,REQUEST);
+
+	struct list_head* pos;
+	struct http_general_header* tmp;
+
+	printf("%s,%s,%s\n",line->method,line->uri,line->version);
+	list_for_each(pos,&req->headers->list){
+		tmp = list_entry(pos,struct http_general_header,list);
+		printf("n:%s,v:%s\n",tmp->name,tmp->value);
+	}
+
+	return 0;
+}

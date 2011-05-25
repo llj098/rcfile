@@ -1,0 +1,60 @@
+/*
+ * =====================================================================================
+ *
+ *       Filename:  helper.c
+ *
+ *    Description:  
+ *
+ *        Version:  1.0
+ *        Created:  12/29/2010 11:03:19 AM
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  YOUR NAME (), 
+ *        Company:  
+ *
+ * =====================================================================================
+ */
+
+#include <kvs.h>
+
+
+int kvs_ip_addr_to_int(char *ip)
+{
+	unsigned int ret=0,i;
+	char *p,*s;
+	s = kstrdup(ip);
+
+	for (i = 0; i < 4; i++) {
+		if((p=strsep(&s,"."))) {
+			unsigned int tmp = simple_strtol(p,NULL,10);
+			ret = ret | tmp<<(8*(3-i));
+			printf("%u,%u,%u\n",ret,tmp,192<<24);
+		}
+		else{
+			ret = 0;
+			break;
+		}
+	}
+
+	kfree(s);
+	return ret;
+}
+
+int
+string_to_number(const char *s, int min, int max)
+{
+	long number;
+	char *end;
+
+	errno = 0;
+	number = strtol(s, &end, 10);
+	if (*end == '\0' && end != s) {
+		/* We parsed a number, let's see if we want this. */
+		if (errno != ERANGE && min <= number && number <= max)
+			return number;
+	}
+	return -1;
+}
+
+

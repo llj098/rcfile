@@ -1,0 +1,14 @@
+192.168.1.134	T60	# Added by NetworkManager
+127.0.0.1	localhost.localdomain	localhost
+::1	T60	localhost6.localdomain6	localhost6
+127.0.1.1	T60
+
+# The following lines are desirable for IPv6 capable hosts
+::1     localhost ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+ff02::3 ip6-allhosts
+
+192.168.1.200 WS

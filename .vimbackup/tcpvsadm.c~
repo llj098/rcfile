@@ -1,0 +1,711 @@
+/*
+ *      tcpvsadm - TCP Virtual Server ADMinistration program
+ *
+ *      Version: $Id: tcpvsadm.c 75 2003-05-23 02:13:31Z wensong $
+ *
+ *      Authors: Wensong Zhang <wensong@linuxvirtualserver.org>
+ *
+ *      Note that a lot code is taken from ipvsadm.c.
+ *
+ *      This program is free software; you can redistribute it and/or modify
+ *      it under the terms of the GNU General Public License as published by
+ *      the Free Software Foundation; either version 2 of the License, or
+ *      (at your option) any later version.
+ *
+ *      This program is distributed in the hope that it will be useful,
+ *      but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *      MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *      GNU General Public License for more details.
+ *
+ *      You should have received a copy of the GNU General Public License
+ *      along with this program; if not, write to the Free Software
+ *      Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
+ */
+
+#undef __KERNEL__		/* Makefile lazyness ;) */
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <getopt.h>
+#include <netdb.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <ctype.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/param.h>
+#include <arpa/inet.h>
+
+#include <net/if.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/udp.h>
+#include <netinet/tcp.h>
+
+#include "tcp_vs.h"
+#include "helper.h"
+#include "tcpvs_config.h"
+#include "libtcpvs/libtcpvs.h"
+
+static const char *program;
+#define TCPVSADM_VERSION_DATE	"22-Feb-2003"
+static const char *program_version = VERSION ", " TCPVSADM_VERSION_DATE;
+
+/* default scheduler */
+#define DEFAULT_SCHEDULER	"http"
+
+/* check the options based on the commands_v_options table */
+static void generic_opt_check(int command, int options);
+static void set_command(unsigned int *cmd, unsigned int newcmd);
+static void set_option(unsigned int *options, unsigned int option);
+
+static void tryhelp_exit(const int status);
+static void usage_exit(const int status);
+static void fail(int err, char *msg, ...);
+
+static int list_service(struct tcp_vs_ident *id, unsigned int format);
+static int list_all(unsigned int format);
+static int load_configfile(char *cf);
+static int modprobe_ktcpvs(void);
+
+
+#define CMD_NONE		0x0000U
+#define CMD_ADD			0x0001U
+#define CMD_EDIT		0x0002U
+#define CMD_DEL			0x0004U
+#define CMD_FLUSH		0x0008U
+#define CMD_LIST		0x0010U
+#define CMD_ADDDEST		0x0020U
+#define CMD_EDITDEST		0x0040U
+#define CMD_DELDEST		0x0080U
+#define CMD_ADDRULE		0x0100U
+#define CMD_DELRULE		0x0200U
+#define CMD_START		0x0400U
+#define CMD_STOP		0x0800U
+#define CMD_LOADCF		0x1000U
+#define NUMBER_OF_CMD		13
+
+static const char *cmdnames[] = {
+	"add-service",
+	"edit-service",
+	"delele-service",
+	"flush",
+	"list",
+	"add-server",
+	"delete-server",
+	"edit-server",
+	"add-rule",
+	"del-rule",
+	"start",
+	"stop",
+	"load-configfile",
+};
+
+#define OPT_NONE	0x00000
+#define OPT_NUMERIC	0x00001
+#define OPT_IDENT	0x00002
+#define OPT_SCHEDULER	0x00004
+#define OPT_SERVERADDR	0x00008
+#define OPT_SERVERPORT	0x00010
+#define OPT_REALSERVER	0x00020
+#define OPT_WEIGHT	0x00040
+#define OPT_PATTERN	0x00080
+#define NUMBER_OF_OPT	9
+
+static const char *optnames[] = {
+	"numeric",
+	"ident",
+	"scheduler",
+	"serveraddr",
+	"serverport",
+	"real-server",
+	"weight",
+	"pattern",
+};
+
+/*
+ * Table of legal combinations of commands and options.
+ * Key:
+ *  '+'  compulsory
+ *  'x'  illegal
+ *  '1'  exclusive (only one '1' option can be supplied)
+ *  ' '  optional
+ */
+static const char commands_v_options[NUMBER_OF_CMD][NUMBER_OF_OPT] = {
+/*             -n   -i   -s   ads  prt  -r   -w   -p */
+/*ADD*/       {'x', '+', ' ', ' ', ' ', 'x', 'x', 'x'},
+/*EDIT*/      {'x', '+', ' ', ' ', ' ', 'x', 'x', 'x'},
+/*DEL*/       {'x', '+', 'x', 'x', 'x', 'x', 'x', 'x'},
+/*FLUSH*/     {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'},
+/*LIST*/      {' ', ' ', 'x', 'x', 'x', 'x', 'x', 'x'},
+/*ADD-SERVER*/{'x', '+', 'x', 'x', 'x', '+', ' ', 'x'},
+/*DEL-SERVER*/{'x', '+', 'x', 'x', 'x', '+', 'x', 'x'},
+/*EDIT-SRV*/  {'x', '+', 'x', 'x', 'x', '+', ' ', 'x'},
+/*ADD-RULE*/  {'x', '+', 'x', 'x', 'x', '+', 'x', '+'},
+/*DEL-RULE*/  {'x', '+', 'x', 'x', 'x', '+', 'x', '+'},
+/*START*/     {'x', '1', 'x', 'x', 'x', 'x', 'x', 'x'},
+/*STOP*/      {'x', '1', 'x', 'x', 'x', 'x', 'x', 'x'},
+/*LOAD-CF*/   {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'},
+};
+
+static struct option long_options[] = {
+	{"add-service", 0, 0, 'A'},
+	{"edit-service", 0, 0, 'E'},
+	{"delete-service", 0, 0, 'D'},
+	{"flush", 0, 0, 'F'},
+	{"list", 0, 0, 'L'},
+	{"add-server", 0, 0, 'a'},
+	{"edit-server", 0, 0, 'e'},
+	{"delete-server", 0, 0, 'd'},
+	{"add-rule", 0, 0, '1'},
+	{"del-rule", 0, 0, '2'},
+	{"start", 0, 0, '3'},
+	{"stop", 0, 0, '4'},
+	{"help", 0, 0, 'h'},
+	{"ident", 1, 0, 'i'},
+	{"port", 1, 0, 'P'},
+	{"scheduler", 1, 0, 's'},
+	{"real-server", 1, 0, 'r'},
+	{"weight", 1, 0, 'w'},
+	{"pattern", 1, 0, 'p'},
+	{"numeric", 0, 0, 'n'},
+	{"load-configfile", 1, 0, 'f'},
+	{0, 0, 0, 0}
+};
+
+
+int
+main(int argc, char **argv)
+{
+	const char *optstring = "AEDFaedLlf:hi:s:P:r:p:n";
+	int c, parse;
+	char cf[128];
+	unsigned int command = CMD_NONE;
+	unsigned int options = OPT_NONE;
+	unsigned int format = FMT_NONE;
+	struct tcp_vs_ident ident;
+	struct tcp_vs_config conf;
+	struct tcp_vs_dest_u dest;
+	struct tcp_vs_rule_u rule;
+	int result = 0;
+
+	if (tcpvs_init()) {
+		/* try to insmod the ip_vs module if ipvs_init failed */
+		if (modprobe_ktcpvs() || tcpvs_init())
+			fail(2, "%s", tcpvs_strerror(errno));
+	}
+
+	/* If no other arguement, list the ktcpvs service table */
+	if (argc == 1) {
+		list_all(format);
+		tcpvs_close();
+		return 0;
+	}
+
+	program = argv[0];
+	memset(&ident, 0, sizeof(ident));
+	memset(&conf, 0, sizeof(conf));
+	memset(&dest, 0, sizeof(dest));
+	memset(&rule, 0, sizeof(rule));
+
+	/* default values */
+	conf.port = htons(8080);
+	conf.maxSpareServers = 18;
+	conf.minSpareServers = 6;
+	conf.startservers = 8;
+	conf.maxClients = 256;
+	dest.weight = 1;
+	strcpy(conf.sched_name, DEFAULT_SCHEDULER);
+
+	/*
+	 *      Parse options
+	 */
+	if ((c = getopt_long(argc, argv, optstring,
+			     long_options, NULL)) == EOF)
+		tryhelp_exit(-1);
+
+	switch (c) {
+	case 'A':
+		set_command(&command, CMD_ADD);
+		break;
+	case 'E':
+		set_command(&command, CMD_EDIT);
+		break;
+	case 'D':
+		set_command(&command, CMD_DEL);
+		break;
+	case 'a':
+		set_command(&command, CMD_ADDDEST);
+		break;
+	case 'e':
+		set_command(&command, CMD_EDITDEST);
+		break;
+	case 'd':
+		set_command(&command, CMD_DELDEST);
+		break;
+	case 'F':
+		set_command(&command, CMD_FLUSH);
+		break;
+	case '1':
+		set_command(&command, CMD_ADDRULE);
+		break;
+	case '2':
+		set_command(&command, CMD_DELRULE);
+		break;
+	case '3':
+		set_command(&command, CMD_START);
+		break;
+	case '4':
+		set_command(&command, CMD_STOP);
+		break;
+	case 'L':
+	case 'l':
+		set_command(&command, CMD_LIST);
+		break;
+	case 'f':
+		set_command(&command, CMD_LOADCF);
+		strncpy(cf, optarg, 128);
+		break;
+	case 'h':
+		usage_exit(0);
+		break;
+	default:
+		tryhelp_exit(-1);
+	}
+
+	while ((c = getopt_long(argc, argv, optstring,
+				long_options, NULL)) != EOF) {
+		switch (c) {
+		case 'i':
+			set_option(&options, OPT_IDENT);
+			strncpy(ident.name, optarg,
+				KTCPVS_IDENTNAME_MAXLEN);
+			break;
+		case 's':
+			set_option(&options, OPT_SCHEDULER);
+			strncpy(conf.sched_name, optarg,
+				KTCPVS_SCHEDNAME_MAXLEN);
+			break;
+		case 'P':
+			set_option(&options, OPT_SERVERPORT);
+			parse = string_to_number(optarg, 1, 65534);
+			if (parse == -1)
+				fail(2, "illegal server port specified");
+			conf.port = htons(parse);
+			break;
+		case 'r':
+			set_option(&options, OPT_REALSERVER);
+			parse = parse_addrport(optarg, IPPROTO_TCP,
+					       &dest.addr, &dest.port);
+			if (parse == 0)
+				fail(2, "illegal address:port specified");
+			break;
+		case 'w':
+			set_option(&options, OPT_WEIGHT);
+			if ((dest.weight =
+			     string_to_number(optarg, 0, 65535)) == -1)
+				fail(2, "illegal weight specified");
+			break;
+		case 'p':
+			set_option(&options, OPT_PATTERN);
+			strncpy(rule.pattern, optarg,
+				KTCPVS_PATTERN_MAXLEN);
+			rule.len = strlen(optarg);
+			break;
+		case 'n':
+			set_option(&options, OPT_NUMERIC);
+			format |= FMT_NUMERIC;
+			break;
+		default:
+			fail(2, "invalid option");
+		}
+	}
+
+	if (optind < argc)
+		fail(2, "unknown arguments found in command line");
+
+	generic_opt_check(command, options);
+
+	if (command == CMD_ADDRULE || command == CMD_DELRULE) {
+		rule.addr = dest.addr;
+		rule.port = dest.port;
+	}
+
+	switch (command) {
+	case CMD_ADD:
+		result = tcpvs_add_service(&ident, &conf);
+		break;
+	case CMD_EDIT:
+		result = tcpvs_edit_service(&ident, &conf);
+		break;
+	case CMD_DEL:
+		result = tcpvs_del_service(&ident);
+		break;
+	case CMD_FLUSH:
+		result = tcpvs_flush();
+		break;
+	case CMD_LIST:
+		if (options & OPT_IDENT)
+			result = list_service(&ident, format);
+		else
+			result = list_all(format);
+		break;
+	case CMD_ADDDEST:
+		result = tcpvs_add_dest(&ident, &dest);
+		break;
+	case CMD_EDITDEST:
+		result = tcpvs_edit_dest(&ident, &dest);
+		break;
+	case CMD_DELDEST:
+		result = tcpvs_del_dest(&ident, &dest);
+		break;
+	case CMD_ADDRULE:
+		result = tcpvs_add_rule(&ident, &rule);
+		break;
+	case CMD_DELRULE:
+		result = tcpvs_del_rule(&ident, &rule);
+		break;
+	case CMD_START:
+		result = tcpvs_start_service(&ident);
+	case CMD_STOP:
+		result = tcpvs_stop_service(&ident);
+		break;
+	case CMD_LOADCF:
+		result = load_configfile(cf);
+		break;
+	}
+
+	if (result)
+		fprintf(stderr, "%s\n", tcpvs_strerror(errno));
+
+	tcpvs_close();
+	return 0;
+}
+
+
+static int
+modprobe_ktcpvs(void)
+{
+	char *argv[] =
+	    { "/sbin/modprobe", "-s", "-k", "--", "ktcpvs", NULL };
+	int child;
+	int status;
+	int rc;
+
+	if (!(child = fork())) {
+		execv(argv[0], argv);
+		exit(1);
+	}
+
+	rc = waitpid(child, &status, 0);
+
+	if (!WIFEXITED(status) || WEXITSTATUS(status)) {
+		return 1;
+	}
+
+	return 0;
+}
+
+
+static int
+load_configfile(char *cf)
+{
+	struct tcpvs_config config;
+	struct tcpvs_service *svc;
+	int i, j;
+	int rc;
+
+	if ((rc = tcpvs_flush()))
+		return rc;
+
+	rc = tcpvs_parse_config(cf, &config);
+	if (rc)
+		return rc;
+
+	for (i = 0; i < config.num_services; i++) {
+		svc = &config.services[i];
+		rc = tcpvs_add_service(&svc->ident, &svc->conf);
+		if (rc)
+			return rc;
+
+		/* add the destination servers */
+		for (j = 0; j < svc->num_dests; j++) {
+			rc = tcpvs_add_dest(&svc->ident, &svc->dests[j]);
+			if (rc)
+				return rc;
+		}
+
+		/* add the rules */
+		for (j = 0; j < svc->num_rules; j++) {
+			rc = tcpvs_add_rule(&svc->ident, &svc->rules[j]);
+			if (rc)
+				return rc;
+		}
+	}
+	return 0;
+}
+
+
+static void
+print_service(struct tcp_vs_service_u *svc, unsigned int format)
+{
+	struct tcp_vs_get_dests *d;
+	struct tcp_vs_get_rules *r;
+	struct in_addr laddr;
+	char *listen;
+	struct in_addr daddr;
+	char *dname;
+	int i;
+
+	if (!(d = tcpvs_get_dests(svc)))
+		exit(1);
+	if (!(r = tcpvs_get_rules(svc)))
+		exit(1);
+
+	printf("Virtual %s {\n", svc->ident.name);
+
+	laddr.s_addr = svc->conf.addr;
+	if (!(listen = addrport_to_anyname(&laddr, ntohs(svc->conf.port),
+					   IPPROTO_TCP, format)))
+		fail(2, "addrport_to_anyname: %s", strerror(errno));
+
+	printf("    listen = %s\n", listen);
+	printf("    scheduler = %s\n", svc->conf.sched_name);
+	printf("    startservers = %d\n", svc->conf.startservers);
+	printf("    maxclients = %d\n", svc->conf.maxClients);
+	printf("    minspareservers = %d\n", svc->conf.minSpareServers);
+	printf("    maxspareservers = %d\n", svc->conf.maxSpareServers);
+
+	/* print the redirect address */
+	if (svc->conf.redirect_port) {
+		struct in_addr addr;
+		char *name;
+
+		addr.s_addr = svc->conf.redirect_addr;
+		name = addrport_to_anyname(&addr,
+					   ntohs(svc->conf.redirect_port),
+					   IPPROTO_TCP, format);
+		if (!name)
+			fail(2, "addrport_to_anyname: %s",
+			     strerror(errno));
+		printf("    redirect = %s\n", name);
+		free(name);
+	}
+
+	/* print all the destination entries */
+	for (i = 0; i < d->num_dests; i++) {
+		struct tcp_vs_dest_u *e = &d->entrytable[i];
+
+		daddr.s_addr = e->addr;
+		if (!(dname = addrport_to_anyname(&daddr, ntohs(e->port),
+						  IPPROTO_TCP, format)))
+			fail(2, "addrport_to_anyname: %s",
+			     strerror(errno));
+		printf("    server = %s %d\n", dname, e->weight);
+		free(dname);
+	}
+
+	/* print all the rule entries */
+	for (i = 0; i < r->num_rules; i++) {
+		struct tcp_vs_rule_u *e = &r->entrytable[i];
+
+		daddr.s_addr = e->addr;
+		if (!(dname = addrport_to_anyname(&daddr, ntohs(e->port),
+						  IPPROTO_TCP, format)))
+			fail(2, "addrport_to_anyname: %s",
+			     strerror(errno));
+		printf("    rule = pattern \"%s\" use server %s\n",
+		       e->pattern, dname);
+		free(dname);
+	}
+
+	printf("}\n");
+	free(listen);
+	free(d);
+}
+
+
+static int
+list_service(struct tcp_vs_ident *id, unsigned int format)
+{
+	struct tcp_vs_service_u *svc;
+
+	if (!(svc = tcpvs_get_service(id)))
+		return -1;
+
+	print_service(svc, format);
+	free(svc);
+	return 0;
+}
+
+
+static int
+list_all(unsigned int format)
+{
+	struct tcp_vs_get_services *get;
+	int i;
+
+	printf("TCP Virtual Server version %d.%d.%d\n",
+	       NVERSION(tcpvs_info.version));
+
+	if (!(get = tcpvs_get_services()))
+		return -1;
+
+	for (i = 0; i < get->num_services; i++)
+		print_service(&get->entrytable[i], format);
+	free(get);
+	return 0;
+}
+
+
+static void
+generic_opt_check(int command, int options)
+{
+	int i, j;
+	int last = 0, count = 0;
+
+	/* Check that commands are valid with options. */
+	for (i = 0; i < NUMBER_OF_CMD; i++) {
+		if (command & (1 << i))
+			break;
+	}
+
+	for (j = 0; j < NUMBER_OF_OPT; j++) {
+		if (!(options & (1 << j))) {
+			if (commands_v_options[i][j] == '+')
+				fail(2, "You need to supply the '%s' "
+				     "option for the '%s' command",
+				     optnames[j], cmdnames[i]);
+		} else {
+			if (commands_v_options[i][j] == 'x')
+				fail(2, "Illegal '%s' option with "
+				     "the '%s' command",
+				     optnames[j], cmdnames[i]);
+			if (commands_v_options[i][j] == '1') {
+				count++;
+				if (count == 1) {
+					last = j;
+					continue;
+				}
+				fail(2,
+				     "The option '%s' conflicts with the "
+				     "'%s' option in the '%s' command",
+				     optnames[j], optnames[last],
+				     cmdnames[i]);
+			}
+		}
+	}
+}
+
+static inline const char *
+opt2name(int option)
+{
+	const char **ptr;
+	for (ptr = optnames; option > 1; option >>= 1, ptr++);
+
+	return *ptr;
+}
+
+static void
+set_command(unsigned int *cmd, unsigned int newcmd)
+{
+	if (*cmd != CMD_NONE)
+		fail(2, "multiple commands specified");
+	*cmd = newcmd;
+}
+
+static void
+set_option(unsigned int *options, unsigned int option)
+{
+	if (*options & option)
+		fail(2, "multiple '%s' options specified",
+		     opt2name(option));
+	*options |= option;
+}
+
+
+static void
+tryhelp_exit(const int status)
+{
+	fprintf(stderr,
+		"Try `%s -h' or '%s --help' for more information.\n",
+		program, program);
+	exit(status);
+}
+
+
+static void
+usage_exit(const int status)
+{
+	FILE *stream;
+
+	if (status != 0)
+		stream = stderr;
+	else
+		stream = stdout;
+
+	fprintf(stream,
+		"%s %s\n"
+		"Usage:\n"
+		"  %s -A|E -i ident [-s scheduler] [-P port]\n"
+		"  %s -D -i ident\n"
+		"  %s -F\n"
+		"  %s -a|e -i ident -r server-address [-w weight]\n"
+		"  %s -d -i ident -r server-address\n"
+		"  %s --add-rule -i ident -p pattern -r server-address\n"
+		"  %s --del-rule -i ident -p pattern -r server-address\n"
+		"  %s -L|l [-n]\n"
+		"  %s -f config-file\n"
+		"  %s --start|stop [-i ident]\n"
+		"  %s -h\n\n",
+		program, program_version, program, program, program,
+		program, program, program, program, program, program,
+		program, program);
+
+	fprintf(stream,
+		"Commands:\n"
+		"Either long or short options are allowed.\n"
+		"  --add-service     -A        add virtual service with options\n"
+		"  --edit-service    -E        edit virtual service with options\n"
+		"  --delete-service  -D        delete virtual service\n"
+		"  --flush           -F        flush the whole table\n"
+		"  --add-server      -a        add real server with options\n"
+		"  --edit-server     -e        edit real server with options\n"
+		"  --delete-server   -d        delete real server\n"
+		"  --add-rule                  add rule into virtual service\n"
+		"  --del-rule                  del rule into virtual service\n"
+		"  --list            -L|-l     list the table\n"
+		"  --load-configfile -f        load a config file\n"
+		"  --start                     start the virtual services\n"
+		"  --stop                      stop the virtual services\n"
+		"  --help            -h        display this help message\n\n");
+
+	fprintf(stream,
+		"Options:\n"
+		"  --ident        -i identity          service identity\n"
+		"  --scheduler    -s scheduler         one of wlc|http\n"
+		"                                      the default scheduler is %s.\n"
+		"  --port         -p port              service port number\n"
+		"  --real-server  -r server-address    server-address is host (and port)\n"
+		"  --weight       -w weight            capacity of real server\n"
+		"  --numeric      -n                   numeric output of addresses and ports\n",
+		DEFAULT_SCHEDULER);
+
+	exit(status);
+}
+
+
+static void
+fail(int err, char *msg, ...)
+{
+	va_list args;
+
+	va_start(args, msg);
+	vfprintf(stderr, msg, args);
+	va_end(args);
+	fprintf(stderr, "\n");
+	exit(err);
+}

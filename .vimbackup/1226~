@@ -1,0 +1,78 @@
+"=========== Meta ============
+"StrID : 49
+"Title : Linux 内核驱动开发环境搭建
+"Cats  : 
+"Tags  : kernel,内核
+"wp_slug: kernel-dev-env
+"========== Content ==========
+
+网上有无数分析内核元源码的文章，其中不乏精品，但是说起内核驱动开发，以及开发工具，环境等相关内容，就并不多。正好最近一直在做相关的事情，自己有一些简单的心得，记一下。  
+
+linux驱动就是一个内核模块（kernel module），编译好之后是一个.ko文件，加载到内核之后，就是内核的一部分。然而内核模块不仅仅是驱动程序，也可能是内核的扩展，现有内核代码中没有的功能，都通过这种方式扩展。好比你想实现一个内核级别的TCP SERVER，这时候你就可以写一个内核模块加载到内核里面。
+
+##硬性条件
+开发内核驱动必须要具备的：  
+*  内核头文件  
+*  Gcc 编译器  
+*  Make   
+
+对于内核开发需要准备的东西，网上有很多，这里就不多说了。但是要提到一点，就是写内核模块并不一定要重新编译自己的内核。之前在很多国外的论坛上找相关信息，很多人说要有自己编译的内核，其实不用。下面给几个链接吧，说的都很仔细了,推荐程度依次递增：  
+
+1.Linux 内核驱动开发庖丁解牛-开发环境搭建:http://www.91linux.com/html/article/program/20081130/14095.html  
+2.How to: Compile Linux kernel modules:http://www.cyberciti.biz/tips/compiling-linux-kernel-module.html  
+3.The Linux Kernel Module Programming Guide: http://www.tldp.org/LDP/lkmpg/2.6/html/  
+  
+
+##开发环境
+###操作系统
+我想这不用说吧，一定是linux  
+
+###开发工具
+开发工具我用的是vim，我是一个不折不扣的vim控。其实这部分要求不高，只要是自己喜欢的文本编辑器就好。
+
+针对编辑器，可以多说几句，只要你不是使用的emacs(:P)，那么就真应该试试vim.神一样的编辑器绝对不是浪得虚名。绝对是另外的一种体验，是从没有体会过的快感哦~ 可以看看 善用佳软上面的一些文章：http://xbeta.info/search?cx=008745974804865311006%3Azm_itmaeyj8&cof=FORID%3A9&ie=UTF-8&q=vim
+
+我自己使用的vim插件主要有：c.vim，molokai.vim,snipmate.vim,project.vim,tabbar.vim,taglist
+
+####调试环境
+调试这部分我没有能够找到什么好的资料，但是确实是有一些知名的工具的，好比kgdb。
+
+不过，纯爷们都是不调试的，一般都是硬看，或者是printk输出信息。
+
+这并不是没办法的办法，记得我看 coders at work 这本书的时候，问过好几位著名的黑客，他们都是怎么调试程序的，是不是gdb啥的，他们的答案就是，几乎不怎么使用调试工具，出问题的时候printf。基本上都能找到问题所在了。并不偶然，我记得我在看一些gdb的教程的时候，也有很多相似的说法。
+
+所以，目前没有遇到什么大的问题，我的调试方法就是 printk
+
+####辅助工具
+
+#####Virtual box
+由于是内核开发，一旦程序出问题，你将面临的就是死机，然后长按电源键。这绝对不是个办法，于是只能祭出虚拟机。
+ 
+我个人使用的是virtualbox，它本身就是开源的，而且速度也是比较快.
+
+为了轻便，我在VBox中安装的是Arch linux，挺好。
+
+值得一说的是，默认情况下VBox用的是NAT方式和主机连接，这样可以使虚拟机共享宿主机的互联网访问。但是和宿主机之间的正常网路访问却不行了。
+有两个办法解决这个问题，一个是设置成host-only，然后给虚拟机设置一条路由规则。这样既能上网也可以访问主机。第二中方法是先用NAT安装好所需程序，然后以后就用host-only，和主机互相访问，不访问互联网，这当然是偷懒的办法....
+
+在虚拟机中安装linux头文件，SSH,SCP,GCC,MAKE等工具
+#####SSH&SCP
+宿主机和虚拟机之间同学主要靠SSH和SCP.
+SSH 输命令，SCP 用来传文件，网上的教程实在太多，不细说了。
+
+#####Gnome terminator
+这个工具是之前才发现的，多窗口的终端命令行。
+截个图：
+<a href="http://www.yupoo.com/photos/llj098/79094182/" title="Terminator"><img src="http://pic.yupoo.com/llj098/AHwCtGUU/medium.jpg" alt="Terminator" width="500" height="375" border="0" /></a>
+
+<a href="http://www.yupoo.com/photos/llj098/79166262/" title="gnome-terminal2"><img src="http://pic.yupoo.com/llj098/AIrypukq/medium.jpg" alt="gnome-terminal2" width="500" height="375" border="0" /></a>
+
+文档：man terminator 或者 http://www.tenshu.net/wp-content/uploads/terminator.html
+
+
+References:   
+-  Linux 内核驱动开发庖丁解牛-开发环境搭建:http://www.91linux.com/html/article/program/20081130/14095.html    
+-  How to: Compile Linux kernel modules:http://www.cyberciti.biz/tips/compiling-linux-kernel-module.html    
+-  The Linux Kernel Module Programming Guide: http://www.tldp.org/LDP/lkmpg/2.6/html/    
+-  Terminator: http://www.tenshu.net/wp-content/uploads/terminator.html  
+

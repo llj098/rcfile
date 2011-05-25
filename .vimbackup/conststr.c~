@@ -1,0 +1,28 @@
+
+#include <stdio.h>
+#include <string.h>
+struct man {
+	const char *name;
+};
+
+struct man *m;
+int init()
+{
+	m = malloc(sizeof(struct man));
+	m->name = "nihao";
+}
+
+int main()
+{
+	init();
+	char *n = m->name;
+	m->name = "hahahahahahahaa";
+	printf("%s,%s\n",m->name,n);
+	free(m);
+
+	if(n)
+		printf("after free,n:%s\n",n);
+	else
+		printf("null\n");
+	return 0;
+}

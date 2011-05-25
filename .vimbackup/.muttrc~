@@ -1,0 +1,39 @@
+#folder-hook Personal set from="llj098@gmail.com"
+set mbox_type=Maildir
+set folder=/data/mail
+set spoolfile="+INBOX"
+set record="+INBOX"
+set postponed="+[GMAIL].Drafts Mail"
+mailboxes +"[Gmail].All Mail" +OpenNcuhome +Kernel +[Gmail].Important +MailLists + "+INBOX"
+
+set sort=threads
+set sort_aux=reverse-last-date-received
+
+set reverse_name=yes
+set from = "llj098@gmail.com"
+set realname = "Lijin liu"
+set query_command = "lbdbq '%s'"
+set fast_reply 
+unset mark_old
+
+
+#set imap_user = "llj098@gmail.com"
+#set imap_pass = "PrayForWen"
+
+#set folder = "imaps://imap.gmail.com:993"
+#set spoolfile = "+INBOX"
+#set postponed ="+[Gmail]/Drafts"
+#set trash = "imaps://imap.gmail.com/[Gmail]/Trash"
+
+set header_cache =~/.mutt/cache/headers
+set message_cachedir =~/.mutt/cache/bodies
+set certificate_file =~/.mutt/certificates
+
+set smtp_url = "smtp://llj098@smtp.gmail.com:587/"
+set smtp_pass = "PrayForWen"
+
+auto_view text/html
+auto_view image/*
+
+
+

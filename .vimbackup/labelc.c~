@@ -1,0 +1,33 @@
+/*
+ * =====================================================================================
+ *
+ *       Filename:  labelc.c
+ *
+ *    Description:  
+ *
+ *        Version:  1.0
+ *        Created:  01/19/2011 08:40:09 PM
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  YOUR NAME (), 
+ *        Company:  
+ *
+ * =====================================================================================
+ */
+
+#include <stdio.h>
+
+int 
+main()
+{
+	printf("I think we are out now,but go to test again\n----------");
+	goto test;
+
+	return 1;
+
+	test:
+	printf("we are in test\n");
+	return -1;
+
+}

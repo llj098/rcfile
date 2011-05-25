@@ -1,0 +1,5 @@
+rmmod timer
+rm *.o *.ko *.order
+scp "lliulijin@192.168.3.1:/home/lliulijin/code/demo/*.*" ~/code
+make
+insmod timer.ko

@@ -1,0 +1,1099 @@
+/*
+ * KTCPVS       An implementation of the TCP Virtual Server daemon inside
+ *              kernel for the LINUX operating system. KTCPVS can be used
+ *              to build a moderately scalable and highly available server
+ *              based on a cluster of servers, with more flexibility.
+ *
+ * Version:     $Id: tcp_vs_ctl.c 77 2003-05-23 06:56:14Z wensong $
+ *
+ * Authors:     Wensong Zhang <wensong@linuxvirtualserver.org>
+ *
+ *              This program is free software; you can redistribute it and/or
+ *              modify it under the terms of the GNU General Public License
+ *              as published by the Free Software Foundation; either version
+ *              2 of the License, or (at your option) any later version.
+ *
+ */
+
+#include <linux/config.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/errno.h>
+#include <linux/spinlock.h>
+#include <linux/sysctl.h>
+#include <linux/proc_fs.h>
+
+#include <net/ip.h>
+#include <net/sock.h>
+#include <net/tcp.h>
+
+#include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
+
+#include <asm/uaccess.h>
+
+#include "tcp_vs.h"
+
+
+/*
+ * tcp_vs_svc_list:	  TCPVS service list head
+ * tcp_vs_num_services:	  number of TCPVS services
+ * __tcp_vs_mutex:	  semaphore for TCPVS sockopts,
+ *			  [gs]etsockopt thread may sleep.
+ * __tcp_vs_svc_lock:	  lock for service table
+ *
+ * Only the master_daemon thread and the [gs]etsockopt threads will access
+ * the tcp_vs_svc_list. The master_daemon thread only read it, and the
+ * [gs]etsockopt threads may read/write it, but the __tcp_vs_mutex will
+ * gurantee that only one [gs]etsockopt thread can enter. So, only the
+ * setsockopt thread (using write operations) need do write locking before
+ * access, and the master_daemon thread need to do read locking.
+ *
+ * Note that accessing the members of struct tcp_vs_service *svc (such as
+ * the destination list) need use svc->lock.
+ */
+struct list_head tcp_vs_svc_list;
+static int tcp_vs_num_services = 0;
+static DECLARE_MUTEX(__tcp_vs_mutex);
+rwlock_t __tcp_vs_svc_lock = RW_LOCK_UNLOCKED;
+
+
+/* sysctl variables */
+int sysctl_ktcpvs_unload = 0;
+int sysctl_ktcpvs_max_backlog = 2048;
+int sysctl_ktcpvs_zerocopy_send = 0;
+int sysctl_ktcpvs_keepalive_timeout = 30;
+
+#ifdef CONFIG_TCP_VS_DEBUG
+static int sysctl_ktcpvs_debug_level = 0;
+
+int
+tcp_vs_get_debug_level(void)
+{
+	return sysctl_ktcpvs_debug_level;
+}
+#endif
+
+
+int tcp_vs_sysctl_register(struct tcp_vs_service *svc);
+int tcp_vs_sysctl_unregister(struct tcp_vs_service *svc);
+struct proc_dir_entry *proc_net_ktcpvs_vs_create(struct tcp_vs_service
+						 *svc);
+void proc_net_ktcpvs_vs_release(struct tcp_vs_service *svc);
+
+
+/*
+ *  Lookup destination by {addr,port} in the given service
+ */
+static tcp_vs_dest_t *
+tcp_vs_lookup_dest(struct tcp_vs_service *svc, __u32 daddr, __u16 dport)
+{
+	tcp_vs_dest_t *dest;
+	struct list_head *l, *e;
+
+	read_lock_bh(&svc->lock);
+	/*
+	 * Find the destination for the given virtual server
+	 */
+	l = &svc->destinations;
+	for (e = l->next; e != l; e = e->next) {
+		dest = list_entry(e, tcp_vs_dest_t, n_list);
+		if ((dest->addr == daddr) && (dest->port == dport)) {
+			/* HIT */
+			read_unlock_bh(&svc->lock);
+			return dest;
+		}
+	}
+	read_unlock_bh(&svc->lock);
+	return NULL;
+}
+
+
+/*
+ *  Add a destination into an existing KTCPVS service
+ */
+static int
+tcp_vs_add_dest(struct tcp_vs_service *svc,
+		__u32 daddr, __u16 dport, int weight)
+{
+	tcp_vs_dest_t *dest;
+
+	EnterFunction(2);
+
+	if (weight < 0) {
+		TCP_VS_ERR("server weight less than zero\n");
+		return -ERANGE;
+	}
+
+	/*
+	 * Check if the dest already exists in the list
+	 */
+	dest = tcp_vs_lookup_dest(svc, daddr, dport);
+	if (dest != NULL) {
+		TCP_VS_DBG(0, "tcp_vs_add_dest(): dest already exists\n");
+		return -EEXIST;
+	}
+
+	/*
+	 * Allocate and initialize the dest structure
+	 */
+	dest = kmalloc(sizeof(tcp_vs_dest_t), GFP_ATOMIC);
+	if (dest == NULL) {
+		TCP_VS_ERR("kmalloc failed.\n");
+		return -EFAULT;
+	}
+	memset(dest, 0, sizeof(tcp_vs_dest_t));
+
+	dest->addr = daddr;
+	dest->port = dport;
+	dest->weight = weight;
+
+	atomic_set(&dest->conns, 0);
+	atomic_set(&dest->refcnt, 0);
+	INIT_LIST_HEAD(&dest->r_list);
+
+	write_lock_bh(&svc->lock);
+
+	/* add the dest entry into the list */
+	list_add(&dest->n_list, &svc->destinations);
+	atomic_inc(&dest->refcnt);
+	svc->num_dests++;
+
+	write_unlock_bh(&svc->lock);
+
+	TCP_VS_DBG(2, "Add dest addr=%u.%u.%u.%u port=%u weight=%d\n",
+		   NIPQUAD(daddr), ntohs(dport), weight);
+
+	LeaveFunction(2);
+
+	return 0;
+}
+
+
+/*
+ *  Edit a destination in the given virtual server
+ */
+static int
+tcp_vs_edit_dest(struct tcp_vs_service *svc,
+		 __u32 daddr, __u16 dport, int weight)
+{
+	tcp_vs_dest_t *dest;
+
+	EnterFunction(2);
+
+	if (weight < 0) {
+		TCP_VS_ERR("server weight less than zero\n");
+		return -ERANGE;
+	}
+
+	/*
+	 *    Lookup the destination list
+	 */
+	dest = tcp_vs_lookup_dest(svc, daddr, dport);
+	if (dest == NULL) {
+		TCP_VS_DBG(0, "destination not exist\n");
+		return -ENOENT;
+	}
+
+	write_lock_bh(&svc->lock);
+	dest->weight = weight;
+	write_unlock_bh(&svc->lock);
+
+	LeaveFunction(2);
+
+	return 0;
+}
+
+
+/*
+ *  Delete a destination from the given virtual server
+ */
+static inline void
+__tcp_vs_del_dest(struct tcp_vs_service *svc, tcp_vs_dest_t * dest)
+{
+	/*
+	 *  Remove it from the lists.
+	 */
+	list_del(&dest->n_list);
+	/*  list_del(&dest->r_list); */
+	svc->num_dests--;
+
+	/*
+	 *  Decrease the refcnt of the dest, and free the dest
+	 *  if nobody refers to it (refcnt=0). Otherwise, throw
+	 *  the destination into the trash.
+	 */
+	if (atomic_dec_and_test(&dest->refcnt))
+		kfree(dest);
+}
+
+static int
+tcp_vs_del_dest(struct tcp_vs_service *svc, __u32 daddr, __u16 dport)
+{
+	tcp_vs_dest_t *dest;
+
+	EnterFunction(2);
+
+	/*
+	 *    Lookup the destination list
+	 */
+	dest = tcp_vs_lookup_dest(svc, daddr, dport);
+	if (dest == NULL) {
+		TCP_VS_DBG(0,
+			   "tcp_vs_del_dest(): destination not found!\n");
+		return -ENOENT;
+	}
+
+	if (!list_empty(&dest->r_list)) {
+		TCP_VS_DBG(2, "sorry that a server is used by a rule, "
+			   "remove the rule first\n");
+		return -EBUSY;
+	}
+
+	write_lock_bh(&svc->lock);
+
+	/*
+	 *  Remove dest from the destination list
+	 */
+	__tcp_vs_del_dest(svc, dest);
+
+	/*
+	 *  Called the update_service function of its scheduler
+	 */
+	svc->scheduler->update_service(svc);
+
+	write_unlock_bh(&svc->lock);
+
+	LeaveFunction(2);
+
+	return 0;
+}
+
+
+static int
+tcp_vs_add_rule(struct tcp_vs_service *svc,
+		char *pattern, __u32 addr, __u16 port)
+{
+	tcp_vs_dest_t *dest;
+	struct tcp_vs_rule *r;
+	struct list_head *l;
+	int rc = 0;
+
+	EnterFunction(2);
+	TCP_VS_DBG(2, "pattern=%s addr=%u.%u.%u.%u port=%u\n",
+		   pattern, NIPQUAD(addr), ntohs(port));
+
+	/*
+	 *    Lookup the destination list
+	 */
+	dest = tcp_vs_lookup_dest(svc, addr, port);
+	if (dest == NULL) {
+		TCP_VS_DBG(0, "destination not exist\n");
+		return -ENOENT;
+	}
+
+	if (!list_empty(&dest->r_list)) {
+		TCP_VS_DBG(2, "sorry that a server cannot be "
+			   "added to rule twice\n");
+		return -EBUSY;
+	}
+
+	write_lock_bh(&svc->lock);
+
+	list_for_each(l, &svc->rule_list) {
+		r = list_entry(l, struct tcp_vs_rule, list);
+		if (!strncmp(pattern, r->pattern, r->len)) {
+			TCP_VS_DBG(2,
+				   "add server into an existing rule\n");
+			list_add(&dest->r_list, &r->destinations);
+			svc->num_rules++;
+			goto out;
+		}
+	}
+
+	r = kmalloc(sizeof(struct tcp_vs_rule), GFP_ATOMIC);
+	if (r == NULL) {
+		TCP_VS_ERR("kmalloc failed.\n");
+		rc = -EFAULT;
+		goto out;
+	}
+	memset(r, 0, sizeof(struct tcp_vs_rule));
+	INIT_LIST_HEAD(&r->destinations);
+
+	if (regcomp(&r->rx, pattern, REG_EXTENDED | REG_NOSUB)) {
+		TCP_VS_ERR("pattern compiling failed\n");
+		kfree(r);
+		rc = -EFAULT;
+		goto out;
+	}
+
+	r->pattern = strdup(pattern);
+	r->len = strlen(pattern);
+	list_add(&dest->r_list, &r->destinations);
+
+	/* add this new rule to rule_list finally */
+	if (strcmp(pattern, ".*") && strcmp(pattern, "^/.*"))
+		list_add(&r->list, &svc->rule_list);
+	else
+		list_add_tail(&r->list, &svc->rule_list);
+	svc->num_rules++;
+
+      out:
+	write_unlock_bh(&svc->lock);
+	LeaveFunction(2);
+	return rc;
+}
+
+
+static int
+tcp_vs_del_rule(struct tcp_vs_service *svc,
+		char *pattern, __u32 addr, __u16 port)
+{
+	tcp_vs_dest_t *dest;
+	struct tcp_vs_rule *r;
+	struct list_head *l, *d;
+
+	EnterFunction(2);
+
+	write_lock_bh(&svc->lock);
+	list_for_each(l, &svc->rule_list) {
+		r = list_entry(l, struct tcp_vs_rule, list);
+		if (!strncmp(pattern, r->pattern, r->len)) {
+			TCP_VS_DBG(2, "found the rule\n");
+			goto hit;
+		}
+	}
+	write_unlock_bh(&svc->lock);
+	return -EEXIST;
+
+      hit:
+	list_for_each(d, &r->destinations) {
+		dest = list_entry(d, tcp_vs_dest_t, r_list);
+		if (dest->addr == addr && dest->port == port) {
+			TCP_VS_DBG(2, "found the dest\n");
+			svc->num_rules--;
+			list_del_init(&dest->r_list);
+			if (list_empty(&r->destinations)) {
+				TCP_VS_DBG(2, "release the rule\n");
+				list_del(&r->list);
+				regfree(&r->rx);
+				kfree(r->pattern);
+				kfree(r);
+			}
+			break;
+		}
+	}
+	write_unlock_bh(&svc->lock);
+	LeaveFunction(2);
+	return 0;
+}
+
+
+static void
+__tcp_vs_flush_rule(struct tcp_vs_service *svc)
+{
+	struct list_head *l, *d;
+	struct tcp_vs_rule *r;
+	tcp_vs_dest_t *dest;
+
+	EnterFunction(2);
+	for (l = &svc->rule_list; l->next != l;) {
+		r = list_entry(l->next, struct tcp_vs_rule, list);
+		list_del(&r->list);
+		TCP_VS_DBG(2, "flush the rule %s in the service %s\n",
+			   r->pattern, svc->ident.name);
+		for (d = &r->destinations; d->next != d;) {
+			dest = list_entry(d->next, tcp_vs_dest_t, r_list);
+			list_del_init(&dest->r_list);
+		}
+		regfree(&r->rx);
+		kfree(r->pattern);
+		kfree(r);
+	}
+	LeaveFunction(2);
+}
+
+
+
+struct tcp_vs_service *
+tcp_vs_lookup_byident(const struct tcp_vs_ident *id)
+{
+	struct list_head *e;
+	struct tcp_vs_service *svc;
+
+	list_for_each(e, &tcp_vs_svc_list) {
+		svc = list_entry(e, struct tcp_vs_service, list);
+		if (!strcmp(id->name, svc->ident.name))
+			/* HIT */
+			return svc;
+	}
+
+	return NULL;
+}
+
+
+static int
+tcp_vs_add_service(struct tcp_vs_ident *ident, struct tcp_vs_config *conf)
+{
+	struct tcp_vs_service *svc;
+	struct tcp_vs_scheduler *sched;
+	int ret = 0;
+
+	EnterFunction(2);
+
+	/* lookup scheduler here */
+	sched = tcp_vs_scheduler_get(conf->sched_name);
+	if (sched == NULL) {
+		TCP_VS_INFO("Scheduler module tcp_vs_%s.o not found\n",
+			    conf->sched_name);
+		return -ENOENT;
+	}
+
+	svc = kmalloc(sizeof(*svc), GFP_ATOMIC);
+	if (!svc) {
+		TCP_VS_ERR("no available memory\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+	memset(svc, 0, sizeof(*svc));
+	INIT_LIST_HEAD(&svc->destinations);
+	INIT_LIST_HEAD(&svc->rule_list);
+	memcpy(&svc->ident, ident, sizeof(*ident));
+	memcpy(&svc->conf, conf, sizeof(*conf));
+	if (svc->conf.maxClients > KTCPVS_CHILD_HARD_LIMIT)
+		svc->conf.maxClients = KTCPVS_CHILD_HARD_LIMIT;
+	svc->lock = RW_LOCK_UNLOCKED;
+
+	ret = tcp_vs_bind_scheduler(svc, sched);
+	if (ret != 0) {
+		kfree(svc);
+		goto out;
+	}
+
+	write_lock_bh(&__tcp_vs_svc_lock);
+	list_add(&svc->list, &tcp_vs_svc_list);
+	tcp_vs_num_services++;
+	write_unlock_bh(&__tcp_vs_svc_lock);
+
+      out:
+	tcp_vs_scheduler_put(sched);
+	LeaveFunction(2);
+	return ret;
+}
+
+
+static int
+tcp_vs_edit_service(struct tcp_vs_service *svc, struct tcp_vs_config *conf)
+{
+	struct tcp_vs_scheduler *sched;
+
+	EnterFunction(2);
+
+	/* lookup scheduler here */
+	if (strcmp(svc->scheduler->name, conf->sched_name)) {
+		sched = tcp_vs_scheduler_get(conf->sched_name);
+		if (sched == NULL) {
+			TCP_VS_INFO
+			    ("Scheduler module tcp_vs_%s.o not found\n",
+			     conf->sched_name);
+			return -ENOENT;
+		}
+		tcp_vs_unbind_scheduler(svc);
+		tcp_vs_bind_scheduler(svc, sched);
+		tcp_vs_scheduler_put(sched);
+	}
+
+	memcpy(&svc->conf, conf, sizeof(*conf));
+	if (svc->conf.maxClients > KTCPVS_CHILD_HARD_LIMIT)
+		svc->conf.maxClients = KTCPVS_CHILD_HARD_LIMIT;
+
+	LeaveFunction(2);
+	return 0;
+}
+
+static inline int
+__tcp_vs_del_service(struct tcp_vs_service *svc)
+{
+	struct list_head *l;
+	tcp_vs_dest_t *dest;
+
+	if (atomic_read(&svc->running)) {
+		TCP_VS_ERR("The VS is running, you'd better stop it first"
+			   "before deleting it.\n");
+		return -EBUSY;
+	}
+
+	tcp_vs_num_services--;
+
+	/* unlink the whole destination list */
+	write_lock_bh(&svc->lock);
+	__tcp_vs_flush_rule(svc);
+	for (l = &svc->destinations; l->next != l;) {
+		dest = list_entry(l->next, tcp_vs_dest_t, n_list);
+		__tcp_vs_del_dest(svc, dest);
+	}
+	tcp_vs_unbind_scheduler(svc);
+	write_unlock_bh(&svc->lock);
+
+	list_del(&svc->list);
+	kfree(svc);
+	return 0;
+}
+
+static int
+tcp_vs_del_service(struct tcp_vs_service *svc)
+{
+	int ret;
+
+	EnterFunction(2);
+
+	write_lock_bh(&__tcp_vs_svc_lock);
+	ret = __tcp_vs_del_service(svc);
+	write_unlock_bh(&__tcp_vs_svc_lock);
+
+	LeaveFunction(2);
+	return ret;
+}
+
+
+int
+tcp_vs_flush(void)
+{
+	struct list_head *l;
+	struct tcp_vs_service *svc;
+	int ret = 0;
+
+	EnterFunction(2);
+
+	write_lock_bh(&__tcp_vs_svc_lock);
+	for (l = &tcp_vs_svc_list; l->next != l;) {
+		svc = list_entry(l->next, struct tcp_vs_service, list);
+		if ((ret = __tcp_vs_del_service(svc)))
+			break;
+	}
+	write_unlock_bh(&__tcp_vs_svc_lock);
+
+	LeaveFunction(2);
+	return 0;
+}
+
+static int
+tcp_vs_start_all(void)
+{
+	struct list_head *e;
+	struct tcp_vs_service *svc;
+
+	write_lock_bh(&__tcp_vs_svc_lock);
+	list_for_each(e, &tcp_vs_svc_list) {
+		svc = list_entry(e, struct tcp_vs_service, list);
+		svc->start = 1;
+	}
+	write_unlock_bh(&__tcp_vs_svc_lock);
+
+	return 0;
+}
+
+static int
+tcp_vs_stop_all(void)
+{
+	struct list_head *e;
+	struct tcp_vs_service *svc;
+
+	write_lock_bh(&__tcp_vs_svc_lock);
+	list_for_each(e, &tcp_vs_svc_list) {
+		svc = list_entry(e, struct tcp_vs_service, list);
+		svc->stop = 1;
+	}
+	write_unlock_bh(&__tcp_vs_svc_lock);
+
+	return 0;
+}
+
+
+static int
+do_tcp_vs_set_ctl(struct sock *sk, int cmd, void *user, unsigned int len)
+{
+	int ret = 0;
+	struct tcp_vs_ident ident;
+	struct tcp_vs_service *svc;
+	struct tcp_vs_config *conf = NULL;
+	struct tcp_vs_dest_u *dest = NULL;
+	struct tcp_vs_rule_u *rule = NULL;
+
+	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
+
+	/* len > 128000 is a sanity check */
+	if (len > 128000) {
+		TCP_VS_ERR("do_tcp_vs_set_ctl: len > 128000\n");
+		return -EINVAL;
+	}
+
+	MOD_INC_USE_COUNT;
+	down(&__tcp_vs_mutex);
+
+	if (cmd == TCP_VS_SO_SET_FLUSH) {
+		/* Flush all the TCP virtual servers */
+		ret = tcp_vs_flush();
+		goto out;
+	}
+
+	if (copy_from_user(&ident, user, sizeof(ident))) {
+		ret = -EFAULT;
+		goto out;
+	}
+	user += sizeof(ident);
+
+	if (ident.name[0] == '\0') {
+		ret = -ESRCH;
+		if (cmd == TCP_VS_SO_SET_START)
+			ret = tcp_vs_start_all();
+		else if (cmd == TCP_VS_SO_SET_STOP)
+			ret = tcp_vs_stop_all();
+		goto out;
+	}
+
+	/* Avoid the non-terminated string here */
+	ident.name[KTCPVS_IDENTNAME_MAXLEN - 1] = '\0';
+
+	svc = tcp_vs_lookup_byident(&ident);
+	if (!svc && cmd != TCP_VS_SO_SET_ADD) {
+		ret = -ESRCH;
+		goto out;
+	}
+
+	/* copy other parameters from user space */
+	switch (cmd) {
+	case TCP_VS_SO_SET_ADD:
+	case TCP_VS_SO_SET_EDIT:
+		if (!(conf = kmalloc(sizeof(*conf), GFP_KERNEL))) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		if (copy_from_user(conf, user, sizeof(*conf))) {
+			ret = -EFAULT;
+			goto out;
+		}
+		break;
+
+	case TCP_VS_SO_SET_ADDDEST:
+	case TCP_VS_SO_SET_EDITDEST:
+	case TCP_VS_SO_SET_DELDEST:
+		if (!(dest = kmalloc(sizeof(*dest), GFP_KERNEL))) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		if (copy_from_user(dest, user, sizeof(*dest))) {
+			ret = -EFAULT;
+			goto out;
+		}
+		break;
+
+	case TCP_VS_SO_SET_ADDRULE:
+	case TCP_VS_SO_SET_DELRULE:
+		if (!(rule = kmalloc(sizeof(*rule), GFP_KERNEL))) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		if (copy_from_user(rule, user, sizeof(*rule))) {
+			ret = -EFAULT;
+			goto out;
+		}
+		break;
+	}
+
+	/* process the command */
+	switch (cmd) {
+	case TCP_VS_SO_SET_ADD:
+		if (svc != NULL)
+			ret = -EEXIST;
+		else
+			ret = tcp_vs_add_service(&ident, conf);
+		break;
+
+	case TCP_VS_SO_SET_EDIT:
+		ret = tcp_vs_edit_service(svc, conf);
+		break;
+
+	case TCP_VS_SO_SET_DEL:
+		ret = tcp_vs_del_service(svc);
+		if (!ret)
+			goto out;
+		break;
+
+	case TCP_VS_SO_SET_ADDDEST:
+		ret = tcp_vs_add_dest(svc, dest->addr,
+				      dest->port, dest->weight);
+		break;
+
+	case TCP_VS_SO_SET_EDITDEST:
+		ret = tcp_vs_edit_dest(svc, dest->addr,
+				       dest->port, dest->weight);
+		break;
+
+	case TCP_VS_SO_SET_DELDEST:
+		ret = tcp_vs_del_dest(svc, dest->addr, dest->port);
+		break;
+
+	case TCP_VS_SO_SET_ADDRULE:
+		ret = tcp_vs_add_rule(svc, rule->pattern,
+				      rule->addr, rule->port);
+		break;
+
+	case TCP_VS_SO_SET_DELRULE:
+		ret = tcp_vs_del_rule(svc, rule->pattern,
+				      rule->addr, rule->port);
+		break;
+
+	case TCP_VS_SO_SET_START:
+		svc->start = 1;
+		break;
+
+	case TCP_VS_SO_SET_STOP:
+		svc->stop = 1;
+		break;
+
+	default:
+		ret = -EINVAL;
+	}
+
+      out:
+	if (conf)
+		kfree(conf);
+	if (dest)
+		kfree(dest);
+	if (rule)
+		kfree(rule);
+	up(&__tcp_vs_mutex);
+	MOD_DEC_USE_COUNT;
+	return ret;
+}
+
+
+static inline int
+__tcp_vs_get_service_entries(const struct tcp_vs_get_services *get,
+			     struct tcp_vs_get_services *uptr)
+{
+	int count = 0;
+	struct tcp_vs_service *svc;
+	struct list_head *l;
+	struct tcp_vs_service_u entry;
+	int ret = 0;
+
+	if (down_interruptible(&__tcp_vs_mutex))
+		return -ERESTARTSYS;
+	list_for_each(l, &tcp_vs_svc_list) {
+		if (count >= get->num_services)
+			break;
+		svc = list_entry(l, struct tcp_vs_service, list);
+		memcpy(&entry.ident, &svc->ident,
+		       sizeof(struct tcp_vs_ident));
+		memcpy(&entry.conf, &svc->conf,
+		       sizeof(struct tcp_vs_config));
+		entry.num_dests = svc->num_dests;
+		entry.num_rules = svc->num_rules;
+		entry.conns = atomic_read(&svc->conns);
+		entry.running = atomic_read(&svc->running);
+		if (copy_to_user(&uptr->entrytable[count],
+				 &entry, sizeof(entry))) {
+			ret = -EFAULT;
+			break;
+		}
+		count++;
+	}
+	up(&__tcp_vs_mutex);
+	return ret;
+}
+
+static inline int
+__tcp_vs_get_dest_entries(const struct tcp_vs_get_dests *get,
+			  struct tcp_vs_get_dests *uptr)
+{
+	struct tcp_vs_service *svc;
+	int ret = 0;
+
+	if (down_interruptible(&__tcp_vs_mutex))
+		return -ERESTARTSYS;
+	svc = tcp_vs_lookup_byident(&get->ident);
+	if (svc) {
+		int count = 0;
+		tcp_vs_dest_t *dest;
+		struct list_head *l;
+		struct tcp_vs_dest_u entry;
+
+		list_for_each(l, &svc->destinations) {
+			if (count >= get->num_dests)
+				break;
+			dest = list_entry(l, tcp_vs_dest_t, n_list);
+			entry.addr = dest->addr;
+			entry.port = dest->port;
+			entry.weight = dest->weight;
+			entry.conns = atomic_read(&dest->conns);
+			if (copy_to_user(&uptr->entrytable[count],
+					 &entry, sizeof(entry))) {
+				ret = -EFAULT;
+				break;
+			}
+			count++;
+		}
+	} else
+		ret = -ESRCH;
+	up(&__tcp_vs_mutex);
+	return ret;
+}
+
+
+static inline int
+__tcp_vs_get_rule_entries(const struct tcp_vs_get_rules *get,
+			  struct tcp_vs_get_rules *uptr)
+{
+	struct tcp_vs_service *svc;
+	int ret = 0;
+	int count = 0;
+	struct list_head *l, *e;
+
+	down_interruptible(&__tcp_vs_mutex);
+	svc = tcp_vs_lookup_byident(&get->ident);
+	if (!svc) {
+		ret = -ESRCH;
+		goto out;
+	}
+
+	list_for_each(l, &svc->rule_list) {
+		struct tcp_vs_rule *rule;
+
+		rule = list_entry(l, struct tcp_vs_rule, list);
+		list_for_each(e, &rule->destinations) {
+			tcp_vs_dest_t *dest;
+			struct tcp_vs_rule_u entry;
+
+			if (count >= get->num_rules)
+				goto out;
+			dest = list_entry(e, tcp_vs_dest_t, r_list);
+			strcpy(entry.pattern, rule->pattern);
+			entry.len = rule->len;
+			entry.addr = dest->addr;
+			entry.port = dest->port;
+			if (copy_to_user(&uptr->entrytable[count],
+					 &entry, sizeof(entry))) {
+				ret = -EFAULT;
+				goto out;
+			}
+			count++;
+		}
+	}
+      out:
+	up(&__tcp_vs_mutex);
+	return ret;
+}
+
+
+static int
+do_tcp_vs_get_ctl(struct sock *sk, int cmd, void *user, int *len)
+{
+	int ret = 0;
+
+	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
+
+	switch (cmd) {
+	case TCP_VS_SO_GET_VERSION:
+		{
+			char buf[64];
+
+			sprintf(buf, "TCP Virtual Server version %d.%d.%d",
+				NVERSION(TCP_VS_VERSION_CODE));
+			if (*len < strlen(buf) + 1)
+				return -EINVAL;
+			if (copy_to_user(user, buf, strlen(buf) + 1) != 0)
+				return -EFAULT;
+			*len = strlen(buf) + 1;
+		}
+		break;
+
+	case TCP_VS_SO_GET_INFO:
+		{
+			struct tcp_vs_getinfo info;
+			info.version = TCP_VS_VERSION_CODE;
+			info.num_services = tcp_vs_num_services;
+			if (copy_to_user(user, &info, sizeof(info)) != 0)
+				return -EFAULT;
+		}
+		break;
+
+	case TCP_VS_SO_GET_SERVICES:
+		{
+			struct tcp_vs_get_services get;
+
+			if (*len < sizeof(get)) {
+				TCP_VS_ERR("length: %u < %u\n", *len,
+					   sizeof(get));
+				return -EINVAL;
+			}
+			if (copy_from_user(&get, user, sizeof(get)))
+				return -EFAULT;
+			if (*len !=
+			    (sizeof(get) +
+			     sizeof(struct tcp_vs_service_u) *
+			     get.num_services)) {
+				TCP_VS_ERR("length: %u != %u\n", *len,
+					   sizeof(get) +
+					   sizeof(struct tcp_vs_service_u)
+					   * get.num_services);
+				return -EINVAL;
+			}
+			ret = __tcp_vs_get_service_entries(&get, user);
+		}
+		break;
+
+	case TCP_VS_SO_GET_SERVICE:
+		{
+			struct tcp_vs_service_u get;
+			struct tcp_vs_service *svc;
+
+			if (*len != sizeof(get)) {
+				TCP_VS_ERR("length: %u != %u\n", *len,
+					   sizeof(get));
+				return -EINVAL;
+			}
+			if (copy_from_user(&get, user, sizeof(get)))
+				return -EFAULT;
+
+			if (down_interruptible(&__tcp_vs_mutex))
+				return -ERESTARTSYS;
+			svc = tcp_vs_lookup_byident(&get.ident);
+			if (svc) {
+				memcpy(&get.ident, &svc->ident,
+				       sizeof(struct tcp_vs_ident));
+				memcpy(&get.conf, &svc->conf,
+				       sizeof(struct tcp_vs_config));
+				get.num_dests = svc->num_dests;
+				get.num_rules = svc->num_rules;
+				get.conns = atomic_read(&svc->conns);
+				get.running = atomic_read(&svc->running);
+				if (copy_to_user(user, &get, *len) != 0)
+					ret = -EFAULT;
+			} else
+				ret = -ESRCH;
+			up(&__tcp_vs_mutex);
+		}
+		break;
+
+	case TCP_VS_SO_GET_DESTS:
+		{
+			struct tcp_vs_get_dests get;
+
+			if (*len < sizeof(get)) {
+				TCP_VS_ERR("length: %u < %u\n", *len,
+					   sizeof(get));
+				return -EINVAL;
+			}
+			if (copy_from_user(&get, user, sizeof(get)))
+				return -EFAULT;
+			if (*len != (sizeof(get) +
+				     sizeof(struct tcp_vs_dest_u) *
+				     get.num_dests)) {
+				TCP_VS_ERR("length: %u != %u\n", *len,
+					   sizeof(get) +
+					   sizeof(struct tcp_vs_dest_u) *
+					   get.num_dests);
+				return -EINVAL;
+			}
+			ret = __tcp_vs_get_dest_entries(&get, user);
+		}
+		break;
+
+	case TCP_VS_SO_GET_RULES:
+		{
+			struct tcp_vs_get_rules get;
+
+			if (*len < sizeof(get)) {
+				TCP_VS_ERR("length: %u < %u\n", *len,
+					   sizeof(get));
+				return -EINVAL;
+			}
+			if (copy_from_user(&get, user, sizeof(get)))
+				return -EFAULT;
+			if (*len != (sizeof(get) +
+				     sizeof(struct tcp_vs_rule_u) *
+				     get.num_rules)) {
+				TCP_VS_ERR("length: %u != %u\n", *len,
+					   sizeof(get) +
+					   sizeof(struct tcp_vs_rule_u) *
+					   get.num_rules);
+				return -EINVAL;
+			}
+			ret = __tcp_vs_get_rule_entries(&get, user);
+		}
+		break;
+
+	default:
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
+
+static struct nf_sockopt_ops tcp_vs_sockopts = {
+	{NULL, NULL}, PF_INET,
+	TCP_VS_BASE_CTL, TCP_VS_SO_SET_MAX + 1, do_tcp_vs_set_ctl,
+	TCP_VS_BASE_CTL, TCP_VS_SO_GET_MAX + 1, do_tcp_vs_get_ctl
+};
+
+
+static struct ctl_table_header *ktcpvs_table_header;
+
+static ctl_table ktcpvs_table[] = {
+#ifdef CONFIG_TCP_VS_DEBUG
+	{NET_KTCPVS_DEBUGLEVEL, "debug_level", &sysctl_ktcpvs_debug_level,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
+#endif
+	{NET_KTCPVS_UNLOAD, "unload", &sysctl_ktcpvs_unload,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
+	{NET_KTCPVS_MAXBACKLOG, "max_backlog", &sysctl_ktcpvs_max_backlog,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
+	{NET_KTCPVS_ZEROCOPY_SEND, "zerocopy_send",
+	 &sysctl_ktcpvs_zerocopy_send,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
+	{NET_KTCPVS_KEEPALIVE_TIMEOUT, "keepalive_timeout",
+	 &sysctl_ktcpvs_keepalive_timeout,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
+	{0}
+};
+
+static ctl_table ktcpvs_dir_table[] = {
+	{NET_KTCPVS, "ktcpvs", NULL, 0, 0555, ktcpvs_table},
+	{0}
+};
+
+static ctl_table ktcpvs_root_table[] = {
+	{CTL_NET, "net", NULL, 0, 0555, ktcpvs_dir_table},
+	{0}
+};
+
+
+int
+tcp_vs_control_start(void)
+{
+	int ret;
+
+	INIT_LIST_HEAD(&tcp_vs_svc_list);
+
+	ret = nf_register_sockopt(&tcp_vs_sockopts);
+	if (ret) {
+		TCP_VS_ERR("cannot register sockopt.\n");
+		return ret;
+	}
+
+	ktcpvs_table_header = register_sysctl_table(ktcpvs_root_table, 0);
+	return ret;
+}
+
+
+void
+tcp_vs_control_stop(void)
+{
+	unregister_sysctl_table(ktcpvs_table_header);
+	nf_unregister_sockopt(&tcp_vs_sockopts);
+}

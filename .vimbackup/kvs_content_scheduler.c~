@@ -1,0 +1,25 @@
+/*
+ * =====================================================================================
+ *
+ *       Filename:  kvs_content_scheduler.c
+ *
+ *    Description:  
+ *
+ *        Version:  1.0
+ *        Created:  12/28/2010 06:07:46 PM
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  YOUR NAME (), 
+ *        Company:  
+ *
+ * =====================================================================================
+ */
+
+/*A scheduler base on the content*/
+
+
+int schedule(struct kvs_svc_item *svc,struct kvc_conn *conn)
+{
+
+}

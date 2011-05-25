@@ -1,0 +1,1412 @@
+/*
+ *	dphttpd - a simple server implementation to test event polling methods
+ *
+ *            "this software is a mess"(tm)
+ *
+ *  this should work to build it :
+ *
+ *  gcc -O2 -I/usr/src/linux/include -o dphttpd dphttpd.c -lcoro
+ *
+ *	07-01-2001	by Davide Libenzi <davidel@xmailserver.org>
+ *
+ */
+
+/* this is stupid to say but only one of these must be defined */
+
+#define _USE_EVENTPOLL
+#define _USE_SYSEPOLL /* switches from sys_epoll_* to /dev/epoll */
+
+/*
+  #define _USE_STDPOLL
+*/
+/*
+  #define _USE_DEVPOLL
+*/
+/*
+  #define _USE_RTSIGNALS
+*/
+/*
+  #define _USE_ONESIG
+  #define F_LINUX_SPECIFIC_BASE	1024
+  #define F_SETAUXFL	(F_LINUX_SPECIFIC_BASE+3)
+  #define O_ONESIGFD	(2<<17)
+*/
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <unistd.h>
+#ifndef __USE_GNU
+#define __USE_GNU
+#include <fcntl.h>
+#undef __USE_GNU
+#else
+#include <fcntl.h>
+#endif
+#include <stdarg.h>
+#include <string.h>
+#include <assert.h>
+#include <limits.h>
+#include <ctype.h>
+#include <time.h>
+#include <errno.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/socket.h>
+#include <sched.h>
+#include <sys/file.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/select.h>
+#include <sys/wait.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <arpa/nameser.h>
+#include <netdb.h>
+#include <syslog.h>
+#include <glob.h>
+#include <semaphore.h>
+#include <coro.h>
+
+
+
+#if defined(_USE_STDPOLL) || defined(_USE_RTSIGNALS)
+#include <sys/poll.h>
+#endif	/* #if defined(_USE_STDPOLL) || defined(_USE_RTSIGNALS) */
+
+
+#if defined(_USE_EVENTPOLL)
+#include <asm/page.h>
+#include <asm/poll.h>
+#include <linux/linkage.h>
+#include <linux/eventpoll.h>
+#include <linux/unistd.h>
+
+
+#define __sys_epoll_create(maxfds) _syscall1(int, sys_epoll_create, int, maxfds)
+#define __sys_epoll_ctl(epfd, op, fd, events) _syscall4(int, sys_epoll_ctl, \
+														int, epfd, int, op, int, fd, unsigned int, events)
+#define __sys_epoll_wait(epfd, events, timeout) _syscall3(int, sys_epoll_wait, \
+														  int, epfd, struct pollfd **, events, int, timeout)
+
+__sys_epoll_create(maxfds)
+__sys_epoll_ctl(epfd, op, fd, events)
+__sys_epoll_wait(epfd, events, timeout)
+
+
+
+#endif
+
+#if defined(_USE_DEVPOLL)
+#include <asm/page.h>
+#include <asm/poll.h>
+#include <linux/devpoll.h>
+#endif
+
+#include "dbllist.h"
+
+
+
+
+#define CO_STD_STACK_SIZE		(2 * 4096)
+#define STD_SCHED_TIMEOUT		1
+#define STD_LISTEN_SIZE			128
+#define DATA_BUFFER_SIZE		2048
+#define MIN_AHEAD_SPACE			(DATA_BUFFER_SIZE / 12)
+#define STD_MESSAGE_SIZE		128
+#define STD_SERVER_PORT			8080
+#define MAX_DEFAULT_FDS			20000
+
+
+
+struct dph_conn {
+	struct list_head lnk;
+	int sfd;
+	int events, revents;
+	struct coroutine *co;
+	char buffer[DATA_BUFFER_SIZE];
+	int nbytes, rindex;
+};
+
+
+#if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL)
+static int kdpfd;
+static char *map;
+#endif	/* #if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL) */
+
+#if defined(_USE_STDPOLL) || defined(_USE_RTSIGNALS)
+struct pollfd *pfds;
+#endif	/* #if defined(_USE_STDPOLL) || defined(_USE_RTSIGNALS) */
+
+static int maxfds, numfds = 0;
+static int chash_size;
+static struct list_head *chash;
+static int msgsize = STD_MESSAGE_SIZE, port = STD_SERVER_PORT,
+	maxsfd = MAX_DEFAULT_FDS, stksize = CO_STD_STACK_SIZE;
+#if defined(_USE_RTSIGNALS)
+static int rtsig;
+#endif	/* #if defined(_USE_RTSIGNALS) */
+struct sockaddr_in saddr;
+static volatile unsigned long httpresp = 0;
+
+
+
+int dph_socket(int domain, int type, int protocol)
+{
+	int sfd = socket(domain, type, protocol),
+		flags = 1;
+
+	if (sfd == -1)
+		return -1;
+#if defined(_USE_RTSIGNALS)
+	if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 ||
+		fcntl(sfd, F_SETFL, flags | O_NONBLOCK | O_ASYNC) < 0) {
+		close(sfd);
+		return -1;
+	}
+	fcntl(sfd, F_SETSIG, rtsig);
+	fcntl(sfd, F_SETOWN, getpid());
+#if defined(_USE_ONESIG)
+	fcntl(sfd, F_SETAUXFL, O_ONESIGFD);
+#endif	/* #if defined(_USE_ONESIG) */
+#else	/* #if defined(_USE_RTSIGNALS) */
+	if (ioctl(sfd, FIONBIO, &flags) &&
+		((flags = fcntl(sfd, F_GETFL, 0)) < 0 ||
+		 fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0)) {
+		close(sfd);
+		return -1;
+	}
+#endif	/* #if defined(_USE_RTSIGNALS) */
+	return sfd;
+}
+
+
+int dph_close(int sfd)
+{
+	close(sfd);
+	return 0;
+}
+
+
+int dph_connect(struct dph_conn *conn, const struct sockaddr *serv_addr, socklen_t addrlen)
+{
+	if (connect(conn->sfd, serv_addr, addrlen) == -1) {
+		if (errno != EWOULDBLOCK && errno != EINPROGRESS)
+			return -1;
+		conn->events = POLLOUT | POLLERR | POLLHUP;
+		co_resume(conn);
+		if (conn->revents & (POLLERR | POLLHUP))
+			return -1;
+	}
+	return 0;
+}
+
+
+int dph_read(struct dph_conn *conn, char *buf, int nbyte)
+{
+	int n;
+
+	while ((n = read(conn->sfd, buf, nbyte)) < 0) {
+		if (errno == EINTR)
+			continue;
+		if (errno != EAGAIN && errno != EWOULDBLOCK)
+			return -1;
+		conn->events = POLLIN | POLLERR | POLLHUP;
+		co_resume(conn);
+	}
+	return n;
+}
+
+
+int dph_write(struct dph_conn *conn, char const *buf, int nbyte)
+{
+	int n;
+
+	while ((n = write(conn->sfd, buf, nbyte)) < 0) {
+		if (errno == EINTR)
+			continue;
+		if (errno != EAGAIN && errno != EWOULDBLOCK)
+			return -1;
+		conn->events = POLLOUT | POLLERR | POLLHUP;
+		co_resume(conn);
+	}
+	return n;
+}
+
+
+int dph_accept(struct dph_conn *conn, struct sockaddr *addr, int *addrlen)
+{
+	int sfd, flags = 1;
+
+	while ((sfd = accept(conn->sfd, addr, (socklen_t *) addrlen)) < 0) {
+		if (errno == EINTR)
+			continue;
+		if (errno != EAGAIN && errno != EWOULDBLOCK)
+			return -1;
+		conn->events = POLLIN | POLLERR | POLLHUP;
+		co_resume(conn);
+	}
+#if defined(_USE_RTSIGNALS)
+	if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 ||
+		fcntl(sfd, F_SETFL, flags | O_NONBLOCK | O_ASYNC) < 0) {
+		close(sfd);
+		return -1;
+	}
+	fcntl(sfd, F_SETSIG, rtsig);
+	fcntl(sfd, F_SETOWN, getpid());
+#if defined(_USE_ONESIG)
+	fcntl(sfd, F_SETAUXFL, O_ONESIGFD);
+#endif	/* #if defined(_USE_ONESIG) */
+#else	/* #if defined(_USE_RTSIGNALS) */
+	if (ioctl(sfd, FIONBIO, &flags) &&
+		((flags = fcntl(sfd, F_GETFL, 0)) < 0 ||
+		 fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0)) {
+		close(sfd);
+		return -1;
+	}
+#endif	/* #if defined(_USE_RTSIGNALS) */
+	return sfd;
+}
+
+
+static int dph_new_conn(int sfd, void *func)
+{
+	struct dph_conn *conn = (struct dph_conn *) malloc(sizeof(struct dph_conn));
+#if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL)
+	struct pollfd pfd;
+#endif	/* #if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL) */
+
+	if (!conn)
+		return -1;
+
+	memset(conn, 0, sizeof(*conn));
+	DBL_INIT_LIST_HEAD(&conn->lnk);
+	conn->sfd = sfd;
+	conn->events = POLLIN | POLLOUT | POLLERR | POLLHUP;
+	conn->revents = 0;
+	conn->nbytes = conn->rindex = 0;
+	if (!(conn->co = co_create(func, NULL, stksize))) {
+		free(conn);
+		return -1;
+	}
+
+	DBL_LIST_ADDT(&conn->lnk, &chash[sfd % chash_size]);
+
+#if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL)
+#ifdef _USE_SYSEPOLL
+	if (sys_epoll_ctl(kdpfd, EP_CTL_ADD, sfd, POLLIN | POLLOUT | POLLERR | POLLHUP) < 0) {
+		fprintf(stderr, "sys_epoll set insertion error: fd=%d\n", sfd);
+
+		DBL_LIST_DEL(&conn->lnk);
+		co_delete(conn->co);
+		free(conn);
+		return -1;
+
+	}
+#else /* #ifdef _USE_SYSEPOLL */
+	pfd.fd = sfd;
+	pfd.events = POLLIN | POLLOUT | POLLERR | POLLHUP;
+	pfd.revents = 0;
+	if (write(kdpfd, &pfd, sizeof(pfd)) != sizeof(pfd)) {
+		fprintf(stderr, "poll set insertion error: fd=%d\n", sfd);
+
+		DBL_LIST_DEL(&conn->lnk);
+		co_delete(conn->co);
+		free(conn);
+		return -1;
+	}
+#endif /* #ifdef _USE_SYSEPOLL */
+#endif	/* #if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL) */
+
+	++numfds;
+
+	co_call(conn->co, conn);
+
+	return 0;
+}
+
+
+static void dph_exit_conn(struct dph_conn *conn)
+{
+#if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL)
+	struct pollfd pfd;
+#endif	/* #if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL) */
+
+#if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL)
+#ifdef _USE_SYSEPOLL
+	if (sys_epoll_ctl(kdpfd, EP_CTL_DEL, conn->sfd, 0) < 0) {
+		fprintf(stderr, "sys_epoll set deletion error: fd=%d\n", conn->sfd);
+
+	}
+#else /* #ifdef _USE_SYSEPOLL */
+	pfd.fd = conn->sfd;
+	pfd.events = POLLREMOVE;
+	pfd.revents = 0;
+	if (write(kdpfd, &pfd, sizeof(pfd)) != sizeof(pfd)) {
+		fprintf(stderr, "poll set deletion error: fd=%d\n", conn->sfd);
+
+	}
+#endif /* #ifdef _USE_SYSEPOLL */
+#endif	/* #if defined(_USE_EVENTPOLL) || defined(_USE_DEVPOLL) */
+
+	DBL_LIST_DEL(&conn->lnk);
+	dph_close(conn->sfd);
+	free(conn);
+
+	--numfds;
+
+	co_exit(0);
+}
+
+
+static int dph_create_conn(int domain, int type, int protocol, void *func)
+{
+	int sfd = dph_socket(domain, type, protocol);
+
+	return sfd != -1 ? dph_new_conn(sfd, func): -1;
+}
+
+
+static int dph_read_data(struct dph_conn *conn)
+{
+	int nbytes;
+
+	if (conn->rindex > (sizeof(conn->buffer) - MIN_AHEAD_SPACE)) {
+		memcpy(conn->buffer, conn->buffer + conn->rindex, conn->nbytes - conn->rindex);
+		conn->nbytes = conn->nbytes - conn->rindex;
+		conn->rindex = 0;
+	} else if (conn->nbytes == sizeof(conn->buffer) && conn->rindex > 0) {
+		if (conn->rindex > (sizeof(conn->buffer) >> 1))
+			memcpy(conn->buffer, conn->buffer + conn->rindex, conn->nbytes - conn->rindex);
+		else
+			memmove(conn->buffer, conn->buffer + conn->rindex, conn->nbytes - conn->rindex);
+		conn->nbytes = conn->nbytes - conn->rindex;
+		conn->rindex = 0;
+	}
+
+	if ((nbytes = dph_read(conn, conn->buffer + conn->rindex,
+						   sizeof(conn->buffer) - conn->rindex)) <= 0)
+		return -1;
+
+	conn->nbytes += nbytes;
+
+	return 0;
+}
+
+
+static char *dph_read_line(struct dph_conn *conn)
+{
+	char *nline = NULL;
+
+	for (; !nline;) {
+		if (conn->nbytes > conn->rindex) {
+			if ((nline = memchr(conn->buffer + conn->rindex, '\n', conn->nbytes - conn->rindex))) {
+				char *line = conn->buffer + conn->rindex;
+
+				conn->rindex += (nline - line) + 1;
+				for (; nline > line && nline[-1] == '\r'; nline--);
+				*nline = '\0';
+				return line;
+			}
+			if (conn->nbytes == sizeof(conn->buffer))
+				break;
+		}
+		if (dph_read_data(conn) < 0)
+			break;
+	}
+	return NULL;
+}
+
+
+static int dph_parse_request(struct dph_conn *conn)
+{
+	char *line;
+
+	if (!(line = dph_read_line(conn)))
+		return -1;
+
+
+	for (;;) {
+		if (!(line = dph_read_line(conn)))
+			return -1;
+		if (*line == '\0')
+			break;
+
+
+	}
+	return 0;
+}
+
+
+static int dph_send_response(struct dph_conn *conn)
+{
+	static int resplen = -1;
+	static char *resp = NULL;
+
+	if (resp == NULL) {
+		msgsize = ((msgsize + 63) / 64) * 64;
+
+		resp = (char *) malloc(msgsize + 256);
+
+		sprintf(resp,
+				"HTTP/1.1 200 OK\r\n"
+				"Server: dp server\r\n"
+				"Content-Type: text/plain\r\n"
+				"Content-Length: %d\r\n"
+				"\r\n", msgsize);
+
+		while (msgsize > 0) {
+			strcat(resp, "01234567890123\r\n" "01234567890123\r\n" "01234567890123\r\n" "01234567890123\r\n");
+			msgsize -= 64;
+		}
+
+		resplen = strlen(resp);
+	}
+
+	dph_write(conn, resp, resplen);
+
+	return 0;
+}
+
+
+static void *dph_httpd(void *data)
+{
+	struct dph_conn *conn = (struct dph_conn *) data;
+
+	while (dph_parse_request(conn) == 0) {
+		dph_send_response(conn);
+
+	}
+
+	dph_exit_conn(conn);
+	return data;
+}
+
+
+static void *dph_acceptor(void *data)
+{
+	struct dph_conn *conn = (struct dph_conn *) data;
+	struct sockaddr_in addr;
+	int sfd, addrlen = sizeof(addr);
+
+	while ((sfd = dph_accept(conn, (struct sockaddr *) &addr, &addrlen)) != -1) {
+		if (dph_new_conn(sfd, dph_httpd) < 0) {
+			dph_close(sfd);
+
+		}
+	}
+	return data;
+}
+
+
+static struct dph_conn *dph_find(int sfd)
+{
+	struct list_head *head = &chash[sfd % chash_size], *lnk;
+	struct dph_conn *conn;
+
+	DBL_LIST_FOR_EACH(lnk, head) {
+		conn = DBL_LIST_ENTRY(lnk, struct dph_conn, lnk);
+
+		if (conn->sfd == sfd)
+			return conn;
+	}
+	return NULL;
+}
+
+
+unsigned long long dph_mstics(void)
+{
+
+	struct timeval tv;
+
+	if (gettimeofday(&tv, NULL) != 0)
+		return (0);
+
+	return (1000 * (unsigned long long) tv.tv_sec + (unsigned long long) tv.tv_usec / 1000);
+
+}
+
+
+#ifdef _USE_EVENTPOLL
+
+#ifdef _USE_SYSEPOLL
+
+int dph_init(void)
+{
+	int ii;
+
+	if ((kdpfd = sys_epoll_create(maxsfd)) < 0) {
+		perror("sys_epoll_create");
+		return -1;
+	}
+
+	if (!(chash = (struct list_head *) malloc(maxsfd * sizeof(struct list_head)))) {
+		perror("malloc()");
+		close(kdpfd);
+		return -1;
+	}
+
+	maxfds = maxsfd;
+	chash_size = maxfds;
+	for (ii = 0; ii < maxfds; ii++)
+		DBL_INIT_LIST_HEAD(&chash[ii]);
+
+	return 0;
+}
+
+int dph_cleanup(void)
+{
+	close(kdpfd);
+
+	return 0;
+}
+
+#else /* #ifdef _USE_SYSEPOLL */
+
+int dph_init(void)
+{
+	int ii;
+	unsigned long mapsize;
+
+	mapsize = EP_MAP_SIZE(maxsfd);
+
+	if ((kdpfd = open("/dev/epoll", O_RDWR)) == -1) {
+		perror("open() /dev/epoll");
+		return -1;
+	}
+	if (ioctl(kdpfd, EP_ALLOC, maxsfd))
+	{
+		perror("ioctl() /dev/epoll");
+		close(kdpfd);
+		return -1;
+	}
+	if ((map = (char *) mmap(NULL, mapsize, PROT_READ | PROT_WRITE,
+							 MAP_PRIVATE, kdpfd, 0)) == (char *) -1)
+	{
+		perror("mmap() /dev/epoll");
+		ioctl(kdpfd, EP_FREE, 0);
+		close(kdpfd);
+		return -1;
+	}
+
+
+	if (!(chash = (struct list_head *) malloc(maxsfd * sizeof(struct list_head)))) {
+		perror("malloc()");
+		munmap(map, mapsize);
+		ioctl(kdpfd, EP_FREE, 0);
+		close(kdpfd);
+		return -1;
+	}
+
+	maxfds = maxsfd;
+	chash_size = maxfds;
+	for (ii = 0; ii < maxfds; ii++)
+		DBL_INIT_LIST_HEAD(&chash[ii]);
+
+	return 0;
+}
+
+int dph_cleanup(void)
+{
+	unsigned long mapsize;
+
+	mapsize = EP_MAP_SIZE(maxfds);
+
+	munmap(map, mapsize);
+	ioctl(kdpfd, EP_FREE, 0);
+	close(kdpfd);
+
+	return 0;
+}
+
+
+#endif /* #ifdef _USE_SYSEPOLL */
+
+
+/*
+  #define EPLIMTEVENTS	64
+*/
+
+#ifdef _USE_SYSEPOLL
+
+static int dph_scheduler(int loop, unsigned int timeout)
+{
+	int ii, nfds;
+	struct dph_conn *conn;
+	struct pollfd *pfds;
+
+	fprintf(stdout, "sys_epoll scheduler ...\n");
+	do {
+		nfds = sys_epoll_wait(kdpfd, &pfds, timeout * 1000);
+
+		fprintf(stdout, "sys_epoll scheduler: nfds=%d pfds=%p\n",
+				nfds, pfds);
+
+		for (ii = 0; ii < nfds; ii++, pfds++) {
+			if ((conn = dph_find(pfds->fd))) {
+				conn->revents = pfds->revents;
+
+				if (conn->revents & conn->events)
+					co_call(conn->co, conn);
+			}
+		}
+	} while (loop);
+	return 0;
+}
+
+
+#else /* #ifdef _USE_SYSEPOLL */
+
+
+#ifdef EPLIMTEVENTS
+
+static int dph_scheduler(int loop, unsigned int timeout)
+{
+	int ii;
+	static int nfds = 0;
+	struct dph_conn *conn;
+	static struct pollfd *pfds = NULL;
+
+	do {
+		if (!nfds) {
+			struct evpoll evp;
+
+			evp.ep_timeout = timeout * 1000;
+			evp.ep_resoff = 0;
+
+			nfds = ioctl(kdpfd, EP_POLL, &evp);
+			pfds = (struct pollfd *) (map + evp.ep_resoff);
+		}
+		for (ii = 0; ii < EPLIMTEVENTS && nfds > 0; ii++, nfds--, pfds++) {
+			if ((conn = dph_find(pfds->fd))) {
+				conn->revents = pfds->revents;
+
+				if (conn->revents & conn->events)
+					co_call(conn->co, conn);
+			}
+		}
+	} while (loop);
+	return 0;
+}
+
+#else
+
+static int dph_scheduler(int loop, unsigned int timeout)
+{
+	int ii, nfds;
+	struct dph_conn *conn;
+	struct pollfd *pfds;
+	struct evpoll evp;
+
+	do {
+		evp.ep_timeout = timeout * 1000;
+		evp.ep_resoff = 0;
+
+		nfds = ioctl(kdpfd, EP_POLL, &evp);
+		pfds = (struct pollfd *) (map + evp.ep_resoff);
+		for (ii = 0; ii < nfds; ii++, pfds++) {
+			if ((conn = dph_find(pfds->fd))) {
+				conn->revents = pfds->revents;
+
+				if (conn->revents & conn->events)
+					co_call(conn->co, conn);
+			}
+		}
+	} while (loop);
+	return 0;
+}
+
+#endif	/* #ifdef EPLIMTEVENTS */
+
+#endif /* #ifdef _USE_SYSEPOLL */
+
+#endif	/* #ifdef _USE_EVENTPOLL */
+
+
+#ifdef _USE_DEVPOLL
+
+int dph_init(void)
+{
+	int ii;
+	unsigned long mapsize;
+
+	mapsize = maxsfd * sizeof(struct pollfd);
+
+	if ((kdpfd = open("/dev/poll", O_RDWR)) == -1) {
+		perror("open() /dev/poll");
+		return -1;
+	}
+	if (ioctl(kdpfd, DP_ALLOC, maxsfd))
+	{
+		perror("ioctl() /dev/poll");
+		close(kdpfd);
+		return -1;
+	}
+	if ((map = (char *) mmap(NULL, mapsize, PROT_READ | PROT_WRITE,
+							 MAP_PRIVATE, kdpfd, 0)) == (char *) -1)
+	{
+		perror("mmap() /dev/poll");
+		ioctl(kdpfd, DP_FREE, 0);
+		close(kdpfd);
+		return -1;
+	}
+	if (!(chash = (struct list_head *) malloc(maxsfd * sizeof(struct list_head)))) {
+		perror("malloc()");
+		munmap(map, mapsize);
+		ioctl(kdpfd, DP_FREE, 0);
+		close(kdpfd);
+		return -1;
+	}
+
+	maxfds = maxsfd;
+	chash_size = maxfds;
+	for (ii = 0; ii < maxfds; ii++)
+		DBL_INIT_LIST_HEAD(&chash[ii]);
+
+	return 0;
+}
+
+int dph_cleanup(void)
+{
+	unsigned long mapsize;
+
+	mapsize = maxfds * sizeof(struct pollfd);
+
+	munmap(map, mapsize);
+	ioctl(kdpfd, DP_FREE, 0);
+	close(kdpfd);
+	return 0;
+}
+
+static int dph_scheduler(int loop, unsigned int timeout)
+{
+	int ii, nfds;
+	struct dph_conn *conn;
+	struct pollfd *pfds;
+	struct dvpoll dvp;
+
+	do {
+		dvp.dp_nfds = maxfds;
+		dvp.dp_fds = NULL;
+		dvp.dp_timeout = timeout;
+
+		nfds = ioctl(kdpfd, DP_POLL, &dvp);
+		pfds = (struct pollfd *) map;
+		for (ii = 0; ii < nfds; ii++, pfds++) {
+			if ((conn = dph_find(pfds->fd))) {
+				conn->revents = pfds->revents;
+
+				if (conn->revents & conn->events)
+					co_call(conn->co, conn);
+			}
+		}
+	} while (loop);
+	return 0;
+}
+
+#endif	/* #ifdef _USE_DEVPOLL */
+
+
+#ifdef _USE_STDPOLL
+
+int dph_init(void)
+{
+	int ii;
+
+	if (!(pfds = (struct pollfd *) malloc(maxsfd * sizeof(struct pollfd)))) {
+		perror("malloc()");
+		return -1;
+	}
+
+	if (!(chash = (struct list_head *) malloc(maxsfd * sizeof(struct list_head)))) {
+		perror("malloc()");
+		free(pfds);
+		return -1;
+	}
+
+	maxfds = maxsfd;
+	chash_size = maxfds;
+	for (ii = 0; ii < maxfds; ii++)
+		DBL_INIT_LIST_HEAD(&chash[ii]);
+
+	return 0;
+}
+
+int dph_cleanup(void)
+{
+	free(pfds);
+	return 0;
+}
+
+static int dph_scheduler(int loop, unsigned int timeout)
+{
+	int ii, nfds, rfds;
+	struct pollfd *cpfds;
+	struct list_head *head, *lnk;
+	struct dph_conn *conn;
+
+	do {
+		for (ii = 0, nfds = 0, cpfds = pfds; ii < chash_size; ii++) {
+			head = &chash[ii];
+			DBL_LIST_FOR_EACH(lnk, head) {
+				conn = DBL_LIST_ENTRY(lnk, struct dph_conn, lnk);
+
+				cpfds->fd = conn->sfd;
+				cpfds->events = conn->events;
+				cpfds->revents = 0;
+				++cpfds;
+				++nfds;
+			}
+		}
+
+		rfds = poll(pfds, nfds, timeout * 1000);
+		for (ii = 0, cpfds = pfds; rfds > 0 && ii < nfds; ii++, cpfds++) {
+			if (cpfds->revents && (conn = dph_find(cpfds->fd))) {
+				--rfds;
+				conn->revents = cpfds->revents;
+
+				if (conn->revents & conn->events)
+					co_call(conn->co, conn);
+			}
+		}
+	} while (loop);
+	return 0;
+}
+
+#endif	/* #ifdef _USE_STDPOLL */
+
+
+#ifdef _USE_RTSIGNALS
+
+int dph_init(void)
+{
+	int ii;
+	sigset_t sset;
+
+	if (!(pfds = (struct pollfd *) malloc(maxsfd * sizeof(struct pollfd)))) {
+		perror("malloc()");
+		return -1;
+	}
+
+	if (!(chash = (struct list_head *) malloc(maxsfd * sizeof(struct list_head)))) {
+		perror("malloc()");
+		free(pfds);
+		return -1;
+	}
+
+	rtsig = SIGRTMIN + 1;
+
+	sigemptyset(&sset);
+	sigaddset(&sset, rtsig);
+	sigaddset(&sset, SIGIO);
+
+	sigprocmask(SIG_BLOCK, &sset, NULL);
+
+	maxfds = maxsfd;
+	chash_size = maxfds;
+	for (ii = 0; ii < maxfds; ii++)
+		DBL_INIT_LIST_HEAD(&chash[ii]);
+
+	return 0;
+}
+
+int dph_cleanup(void)
+{
+	free(pfds);
+	return 0;
+}
+
+static int dph_scheduler(int loop, unsigned int timeout)
+{
+	int sig, ii, nfds, rfds;
+	static int topoll = 0;
+	struct dph_conn *conn;
+	struct pollfd *cpfds;
+	struct list_head *head, *lnk;
+	sigset_t sset;
+	siginfo_t sinfo;
+	struct timespec ts;
+
+	sigemptyset(&sset);
+	sigaddset(&sset, SIGIO);
+	sigaddset(&sset, rtsig);
+	do {
+		if (topoll) {
+			for (ii = 0, nfds = 0, cpfds = pfds; ii < chash_size; ii++) {
+				head = &chash[ii];
+				DBL_LIST_FOR_EACH(lnk, head) {
+					conn = DBL_LIST_ENTRY(lnk, struct dph_conn, lnk);
+
+					cpfds->fd = conn->sfd;
+					cpfds->events = conn->events;
+					cpfds->revents = 0;
+					++cpfds;
+					++nfds;
+				}
+			}
+
+			rfds = poll(pfds, nfds, timeout * 1000);
+			for (ii = 0, cpfds = pfds; rfds > 0 && ii < nfds; ii++, cpfds++) {
+				if (cpfds->revents && (conn = dph_find(cpfds->fd))) {
+					--rfds;
+					conn->revents = cpfds->revents;
+
+					if (conn->revents & conn->events)
+						co_call(conn->co, conn);
+				}
+			}
+			topoll = 0;
+		}
+
+		memset(&sinfo, 0, sizeof(sinfo));
+		ts.tv_sec = timeout;
+		ts.tv_nsec = 0;
+
+		sig = sigtimedwait(&sset, &sinfo, &ts);
+
+		if (sig == rtsig) {
+			if ((conn = dph_find(sinfo.si_fd))) {
+				conn->revents = sinfo.si_band;
+
+				if (conn->revents & conn->events)
+					co_call(conn->co, conn);
+			}
+		} else if (sig == SIGIO) {
+			printf("sig=(%d==SIGIO) fd=%d band=%d\n", sig, sinfo.si_fd, sinfo.si_band);
+
+			ts.tv_sec = 0;
+			ts.tv_nsec = 0;
+
+			while (sigtimedwait(&sset, &sinfo, &ts) > 0);
+
+			topoll = 1;
+		}
+	} while (loop);
+	return 0;
+}
+
+#endif	/* #ifdef _USE_RTSIGNALS */
+
+
+/*
+  #define HTTP_BLASTER
+*/
+/*
+#define DPHTTPD
+*/
+
+#define PIPETESTER
+
+
+#if defined(DPHTTPD)
+
+void dph_usage(char const *prgname)
+{
+
+	fprintf(stderr,
+			"use: %s [--msgsize nbytes (%d)] [--port nbr (%d)] [--maxfds nfds (%d)]\n\t[--stksize bytes (%d)]\n",
+			prgname, msgsize, port, maxsfd, stksize);
+
+}
+
+
+int main(int argc, char *argv[])
+{
+	int ii, sfd, flags = 1;
+	struct linger ling = {0, 0};
+	struct sockaddr_in addr;
+
+	for (ii = 1; ii < argc; ii++) {
+		if (strcmp(argv[ii], "--msgsize") == 0) {
+			if (++ii < argc)
+				msgsize = atoi(argv[ii]);
+			continue;
+		}
+		if (strcmp(argv[ii], "--port") == 0) {
+			if (++ii < argc)
+				port = atoi(argv[ii]);
+			continue;
+		}
+		if (strcmp(argv[ii], "--maxfds") == 0) {
+			if (++ii < argc)
+				maxsfd = atoi(argv[ii]);
+			continue;
+		}
+		if (strcmp(argv[ii], "--stksize") == 0) {
+			if (++ii < argc)
+				stksize = atoi(argv[ii]);
+			continue;
+		}
+
+		dph_usage(argv[0]);
+		return 1;
+	}
+
+	if (dph_init() == -1) {
+
+		return 2;
+	}
+
+	if ((sfd = dph_socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+
+		dph_cleanup();
+		return 3;
+	}
+	setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(flags));
+	setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &flags, sizeof(flags));
+	setsockopt(sfd, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling));
+
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(port);
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	if (bind(sfd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
+
+		dph_close(sfd);
+		dph_cleanup();
+		return 4;
+	}
+
+	listen(sfd, STD_LISTEN_SIZE);
+
+	if (dph_new_conn(sfd, (void *) dph_acceptor) == -1) {
+
+		dph_close(sfd);
+		dph_cleanup();
+		return 5;
+	}
+
+	dph_scheduler(1, STD_SCHED_TIMEOUT);
+
+	dph_cleanup();
+	return 0;
+}
+
+#endif	/* #if defined(DPHTTPD) */
+
+
+
+
+
+#if defined(HTTP_BLASTER)
+
+static void *dph_http_session(void *data)
+{
+	struct dph_conn *conn = (struct dph_conn *) data;
+
+	if (dph_connect(conn, (struct sockaddr *) &saddr, sizeof(saddr)) == 0) {
+		static char const *reqs = "GET / HTTP/1.0\r\n\r\n";
+
+		if (dph_write(conn, reqs, strlen(reqs)) > 0) {
+			static char const *clent = "Content-Length:";
+			int length = -1, clens = strlen(clent);
+			char *line;
+			static char buf[2048];
+
+			while ((line = dph_read_line(conn))) {
+				if (*line == '\0')
+					break;
+				if (strncasecmp(line, clent, clens) == 0)
+					length = atoi(line + clens + 1);
+			}
+			if (length >= 0) {
+				if ((conn->nbytes - conn->rindex) > 0)
+					length -= conn->nbytes - conn->rindex;
+				++httpresp;
+			}
+			while (length > 0) {
+				int rlen = length > sizeof(buf) ? sizeof(buf): length;
+
+				if ((rlen = dph_read(conn, buf, rlen)) <= 0)
+					goto sess_out;
+				length -= rlen;
+			}
+		}
+	}
+sess_out:
+	dph_exit_conn(conn);
+	return data;
+}
+
+
+void dph_usage(char const *prgname)
+{
+
+	fprintf(stderr, "use: %s  --server serv  --port nprt  --numconns ncon  [--stksize bytes (%d)]\n",
+			prgname, stksize);
+
+}
+
+
+int main(int argc, char *argv[])
+{
+	int ii, nconns = 0, totconns = 0;
+	unsigned long resplast;
+	unsigned long long tinit, tlast;
+	struct hostent * he;
+	char const *server = NULL;
+	struct in_addr inadr;
+
+	for (ii = 1; ii < argc; ii++) {
+		if (strcmp(argv[ii], "--server") == 0) {
+			if (++ii < argc)
+				server = argv[ii];
+			continue;
+		}
+		if (strcmp(argv[ii], "--port") == 0) {
+			if (++ii < argc)
+				port = atoi(argv[ii]);
+			continue;
+		}
+		if (strcmp(argv[ii], "--numconns") == 0) {
+			if (++ii < argc) {
+				nconns = atoi(argv[ii]);
+				if (nconns > maxsfd)
+					maxsfd = nconns + nconns >> 1 + 1;
+			}
+			continue;
+		}
+		if (strcmp(argv[ii], "--stksize") == 0) {
+			if (++ii < argc)
+				stksize = atoi(argv[ii]);
+			continue;
+		}
+
+		dph_usage(argv[0]);
+		return 1;
+	}
+
+	if (!server || !nconns) {
+		dph_usage(argv[0]);
+		return 2;
+	}
+
+	if (inet_aton(server, &inadr) == 0)
+	{
+		if ((he = gethostbyname(server)) == NULL)
+		{
+		 	fprintf(stderr, "unable to resolve: %s\n", server);
+		 	return (-1);
+		}
+
+		memcpy(&inadr.s_addr, he->h_addr_list[0], he->h_length);
+	}
+	saddr.sin_family = AF_INET;
+	saddr.sin_port = htons(port);
+	memcpy(&saddr.sin_addr, &inadr.s_addr, 4);
+
+	if (dph_init() == -1) {
+
+		return 2;
+	}
+
+	resplast = 0;
+	tinit = tlast = dph_mstics();
+
+	for (;;) {
+		int nfds = numfds, errs = 0, diffconns = nconns - numfds;
+		unsigned long long tcurr;
+
+		while (numfds < nconns) {
+			dph_create_conn(AF_INET, SOCK_STREAM, 0, dph_http_session);
+			if (nfds == numfds) {
+				++errs;
+				if (errs > 32) {
+					fprintf(stderr, "unable to connect: server=%s errors=%d\n", server, errs);
+					goto main_exit;
+				}
+			}
+			else
+				++totconns;
+			nfds = numfds;
+		}
+
+		dph_scheduler(0, STD_SCHED_TIMEOUT);
+
+		tcurr = dph_mstics();
+		if ((tcurr - tlast) > 1000) {
+			printf("rate = %lu  avg = %lu  totconns = %d  diff = %d\n",
+				   (unsigned long) ((1000 * (httpresp - resplast)) / (tcurr - tlast)),
+				   (unsigned long) ((1000 * httpresp) / (tcurr - tinit)), totconns, diffconns);
+
+			tlast = tcurr;
+			resplast = httpresp;
+		}
+	}
+
+main_exit:
+	dph_cleanup();
+	return 0;
+}
+
+#endif	/* #if defined(HTTP_BLASTER) */
+
+
+
+
+
+#if defined(PIPETESTER)
+
+
+int dph_createcgi(char **args, void *func)
+{
+	int fds[2], flags = 1;
+	pid_t chpid;
+
+	if (pipe(fds)) {
+		perror("pipe");
+		return -1;
+	}
+	chpid = fork();
+	if (chpid == -1) {
+		perror("fork");
+		close(fds[0]), close(fds[1]);
+		return -1;
+	} else if (chpid == 0) {
+		close(fds[0]);
+		dup2(fds[1], 1);
+		close(fds[1]);
+		execvp(args[0], args);
+		perror("exec");
+		exit(1);
+	}
+	close(fds[1]);
+	if (ioctl(fds[0], FIONBIO, &flags) &&
+		((flags = fcntl(fds[0], F_GETFL, 0)) < 0 ||
+		 fcntl(fds[0], F_SETFL, flags | O_NONBLOCK) < 0)) {
+		close(fds[0]);
+		return -1;
+	}
+	fprintf(stdout, "child-run=%d  fd=%d\n", chpid, fds[0]), fflush(stdout);
+	return dph_new_conn(fds[0], func);
+}
+
+
+int dph_createpipetest(int size, int tsleep, int ttime, void *func)
+{
+	int fds[2], flags = 1;
+	pid_t chpid;
+
+	if (pipe(fds)) {
+		perror("pipe");
+		return -1;
+	}
+	chpid = fork();
+	if (chpid == -1) {
+		perror("fork");
+		close(fds[0]), close(fds[1]);
+		return -1;
+	} else if (chpid == 0) {
+		int ii;
+		char *buff = (char *) malloc(size + 1);
+		close(fds[0]);
+		dup2(fds[1], 1);
+		close(fds[1]);
+
+		srand(getpid() * time(NULL));
+		for (ii = 0; ii < (size - 1); ii++) {
+			if (ii && !(ii % 64))
+				buff[ii] = '\n';
+			else
+				buff[ii] = '0' + (rand() % 10);
+		}
+		buff[ii++] = '\n';
+		buff[ii] = '\0';
+		ttime += (ttime * rand()) / RAND_MAX - (ttime >> 1);
+		ttime *= 1000;
+		while (ttime > 0) {
+			usleep(tsleep * 1000);
+			fputs(buff, stdout), fflush(stdout);
+			ttime -= tsleep;
+		}
+		free(buff);
+		exit(0);
+	}
+	close(fds[1]);
+	if (ioctl(fds[0], FIONBIO, &flags) &&
+		((flags = fcntl(fds[0], F_GETFL, 0)) < 0 ||
+		 fcntl(fds[0], F_SETFL, flags | O_NONBLOCK) < 0)) {
+		close(fds[0]);
+		return -1;
+	}
+	fprintf(stdout, "child-run=%d  fd=%d\n", chpid, fds[0]), fflush(stdout);
+	return dph_new_conn(fds[0], func);
+}
+
+
+static void *dph_pipe_session(void *data)
+{
+	struct dph_conn *conn = (struct dph_conn *) data;
+	int nbytes, totbytes = 0;
+	char buff[257];
+
+	while ((nbytes = dph_read(conn, buff, sizeof(buff))) > 0) {
+		fprintf(stdout, "[%p] %d bytes readed\n", conn, nbytes), fflush(stdout);
+		totbytes += nbytes;
+	}
+	fprintf(stdout, "[%p] exit - totbytes=%d\n", conn, totbytes), fflush(stdout);
+	dph_exit_conn(conn);
+	return data;
+}
+
+
+void dph_sigchld(int sig)
+{
+	int status;
+	pid_t pid;
+
+	while ((pid = waitpid(0, &status, WNOHANG)) > 0) {
+		fprintf(stdout, "child-dead=%d\n", pid), fflush(stdout);
+	}
+	signal(SIGCHLD, dph_sigchld);
+}
+
+
+int main(int argc, char *argv[])
+{
+	int ii, ncgis = 8;
+	char *args[16];
+
+	for (ii = 1; ii < argc; ii++) {
+		if (strcmp(argv[ii], "--ncgis") == 0) {
+			if (++ii < argc)
+				ncgis = atoi(argv[ii]);
+			continue;
+		}
+		return 1;
+	}
+
+	signal(SIGCHLD, dph_sigchld);
+	signal(SIGPIPE, SIG_IGN);
+
+	if (dph_init() == -1) {
+
+		return 2;
+	}
+#if defined(TESTCGI)
+	args[0] = "/home/davide/dumpy";
+	args[1] = "500";
+	args[2] = "512";
+	args[3] = "10";
+	args[4] = NULL;
+
+	for (ii = 0; ii < ncgis; ii++)
+		dph_createcgi(args, dph_pipe_session);
+#else
+	for (ii = 0; ii < ncgis; ii++)
+		dph_createpipetest(512, 500, 8, dph_pipe_session);
+#endif	/* #if defined(TESTCGI) */
+
+	while (numfds > 0)
+		dph_scheduler(0, STD_SCHED_TIMEOUT);
+
+	dph_cleanup();
+	return 0;
+}
+
+
+
+#endif	/* #if defined(PIPETESTER) */
+

@@ -1,0 +1,28 @@
+#include<linux/kernel.h>
+
+#include <linux/config.h>
+#include <linux/types.h>
+#include <linux/net.h>
+#include <linux/skbuff.h>
+#include <linux/un.h>
+#include <linux/unistd.h>
+#include <linux/wrapper.h>
+#include <linux/wait.h>
+#include <linux/ctype.h>
+#include <asm/unistd.h>
+#include <net/ip.h>
+#include <net/sock.h>
+#include <net/tcp.h>
+
+
+int
+StartListening(struct tcp_vs_service *svc)
+{
+	struct socket *sock;
+	struct sockaddr_in sin;
+	int error;
+
+	error = sock_create(PF_INET,SOCK_STREAM,IPPROTO_IP,&sock);
+
+
+}

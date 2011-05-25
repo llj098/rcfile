@@ -1,0 +1,4 @@
+env = Environment()
+env.Program(target='bar', source=['testlist.c','list.h'])
+
+

@@ -1,0 +1,22 @@
+using System;
+
+using Mono.CSharp;
+
+
+public class Eval
+{
+	public static void Main(string[] args)
+	{
+		// First setup the active using statements:
+		Evaluator.Run ("using System;");
+		Evaluator.Run("Console.WriteLine(0);");
+		object result = new object();
+		bool result_set;
+
+		Evaluator.Evaluate("1+1;",out result, out result_set);
+		Console.WriteLine(0);
+
+		if(result_set)
+			Console.WriteLine(result);
+	}
+}

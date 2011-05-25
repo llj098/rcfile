@@ -1,0 +1,34 @@
+"=========== Meta ============
+"StrID : 
+"Title : Use Simplecd.org instead of verycd
+"Cats  : 推荐
+"wp_slug: simplecd-clone-verycd
+"Tags  : verycd,simplecd.org
+"========== Content ==========
+
+Verycd was a useful website,but now,the function is limited.
+
+It is very pity that many resource has gone. So many music, movie,and so on..
+
+After a few digg,it seems that there is one solution: SimpleCD.org. 
+
+SimpleCD is not only a website which clones the verycd but also an open source project.
+
+SimpleCD is written in python,and save the data into Sqllite database. 
+
+You can visit the website and run the website your own(it means that you can have the database in your hard disk).
+
+I tried it early today, the search tasted good. 
+
+Try It!
+
+
+Reference:
+
+1.SimpleCD: http://www.simplecd.org
+2.verycd:   http://www.verycd.com
+3 SimpleCD project:  http://code.google.com/p/simplecd/
+
+
+
+

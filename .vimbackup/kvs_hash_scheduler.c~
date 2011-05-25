@@ -1,0 +1,14 @@
+
+#include <kvs.h>
+
+
+
+int schedule(struct kvs_svc_item *svc,struct kvc_conn *conn)
+{
+	return 0;
+}
+
+int hash_func(char *key)
+{
+	return 0;
+}

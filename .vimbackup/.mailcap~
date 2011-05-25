@@ -1,0 +1,15 @@
+#text/html; w3m -o document_charse=%{charset} %s; nametemplate=%s.html
+#text/html; w3m -dump -o document_charse=%{charset} %s; nametemplate=%s.html; copiousoutput
+#text/html; w3m -dump -I %{charset} -T text/html %s; copiousoutput
+image/*; ~/.mutt/w3m-img %s
+text/html; w3m -dump -ppc 9 -I %{charset} -T text/html %s|uniq; copiousoutput
+
+
+#text/html ;\
+#w3m -T text/html -I %{charset} -dump %s ;\
+#nametemplate=%s.html ;\
+#copiousoutput
+
+
+
+
