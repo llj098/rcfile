@@ -17,6 +17,9 @@
 $
 
 # Command Line History (newest to oldest):
+:q
+:wq
+:w
 :e ~/.zshrc
 :set tags
 :tags
@@ -24,9 +27,7 @@ $
 :e driver.cs
 :grep -R Main .
 :grep -R Main( .
-:q
 :e ~/Source/mono/mcs/mcs/
-:w
 :e ~/code/test/eval.cs
 :call CleanClose(1)
 :set wrap
@@ -86,7 +87,6 @@ $
 :set tags+=tags
 :e ~/code/tcp_svr_sample.c
 :Tlist
-:wq
 :e! ~/.xmonad/xmonad.hs
 :x
 :e ~/.xmonad/xmonad.hs
@@ -870,46 +870,49 @@ $
 # Input Line History (newest to oldest):
 
 # Registers:
-""0	CHAR	0
-	class a{int x;}
-"1	LINE	0
+"0	LINE	0
+	sudo cp -r .bash* ~/rc/
+""1	LINE	0
 	
 "2@	LINE	0
 	
 "3	LINE	0
-			int sum = (int) Evaluator.Evaluate ("1+2");
+	
 "4	LINE	0
-			// We know the result is an IEnumerator, cast it.
+	
 "5	LINE	0
-			Evaluator.Run ("var numbers = new int [] {1,2,3,4,5};");
+			int sum = (int) Evaluator.Evaluate ("1+2");
 "6	LINE	0
-			Evaluator.Run ("using System.Linq");
+			// We know the result is an IEnumerator, cast it.
 "7	LINE	0
-			// A more interesting sample
+			Evaluator.Run ("var numbers = new int [] {1,2,3,4,5};");
 "8	LINE	0
-	
+			Evaluator.Run ("using System.Linq");
 "9	LINE	0
-	
+			// A more interesting sample
 "f	LINE	0
 	extern int send_sig_info(int, struct siginfo *, struct task_struct *);
 "k	CHAR	0
 	k
 "-	CHAR	0
-	class a{int x;}
+	bash
 
 # File marks:
-'0  1  0  ~/.zshrc
-'1  315  8  ~/Source/mono/mcs/mcs/driver.cs
-'2  16  0  ~/code/test/eval.cs
-'3  11  0  ~/code/test/eval.cs
-'4  90  0  ~/Source/mono/mcs/INSTALL.txt
-'5  178  0  ~/.xmonad/xmonad.hs
-'6  174  0  ~/.xmonad/xmonad.hs
-'7  423  0  ~/Source/beansdb-0.5.3/bitcask.c
-'8  1  0  ~/Source/beansdb-0.5.3/bitcask.c
-'9  335  0  ~/Source/linux-2.6.36.2/arch/x86/boot/boot.h
+'0  1  0  ~/script/syncrc.sh
+'1  1  0  ~/.zshrc
+'2  315  8  ~/Source/mono/mcs/mcs/driver.cs
+'3  16  0  ~/code/test/eval.cs
+'4  11  0  ~/code/test/eval.cs
+'5  90  0  ~/Source/mono/mcs/INSTALL.txt
+'6  178  0  ~/.xmonad/xmonad.hs
+'7  174  0  ~/.xmonad/xmonad.hs
+'8  423  0  ~/Source/beansdb-0.5.3/bitcask.c
+'9  1  0  ~/Source/beansdb-0.5.3/bitcask.c
 
 # Jumplist (newest first):
+-'  1  0  ~/script/syncrc.sh
+-'  1  0  ~/script/-TabBar-
+-'  2  0  ~/script/-TabBar-
 -'  1  0  ~/.zshrc
 -'  42  0  ~/.zshrc
 -'  506  0  ~/.zshrc
@@ -995,8 +998,37 @@ $
 -'  195  4  ~/Source/redis/src/rdb.c
 -'  364  7  ~/Source/redis/src/rdb.c
 -'  368  14  ~/Source/redis/src/rdb.c
+-'  1  0  ~/.zshrc
+-'  42  0  ~/.zshrc
+-'  506  0  ~/.zshrc
+-'  148  13  ~/.zshrc
+-'  144  13  ~/.zshrc
+-'  392  0  ~/.zshrc
+-'  87  0  ~/.zshrc
+-'  1139  49  ~/Source/redis/src/redis.c
+-'  181  15  ~/Source/redis/src/redis.c
 
 # History of marks within files (newest to oldest):
+
+> ~/script/syncrc.sh
+	"	1	0
+	^	4	15
+	.	1	0
+	+	6	0
+	+	2	0
+	+	3	0
+	+	5	0
+	+	2	14
+	+	3	15
+	+	5	20
+	+	1	0
+	+	4	14
+	+	1	0
+
+> ~/script/-TabBar-
+	"	1	0
+	.	2	0
+	+	2	0
 
 > ~/Source/NERD_tree_1
 	"	1	0
@@ -1789,40 +1821,3 @@ $
 	+	2	0
 	+	2	0
 	+	2	0
-
-> ~/code/__Tag_List__
-	"	35	4
-	.	1170	0
-	+	1256	0
-	+	1254	0
-	+	1212	0
-	+	102	0
-	+	102	0
-	+	264	0
-	+	102	0
-	+	102	0
-	+	102	0
-	+	102	0
-	+	102	0
-	+	102	0
-	+	44	0
-	+	377	0
-	+	546	0
-	+	101	0
-	+	656	0
-	+	746	0
-	+	793	0
-	+	797	0
-	+	806	0
-	+	834	0
-	+	977	0
-	+	1007	0
-	+	1057	0
-	+	1092	0
-	+	1170	0
-
-> ~/Source/linux-2.6.36.2/include/linux/net.h
-	"	262	11
-	.	262	0
-	+	262	95
-	+	262	0
