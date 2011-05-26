@@ -485,12 +485,12 @@ normal zo
 normal zo
 584
 normal zo
-let s:l = 308 - ((30 * winheight(0) + 9) / 18)
+let s:l = 458 - ((102 * winheight(0) + 18) / 36)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-308
-normal! 08l
+458
+normal! 043l
 lcd ~/code
 let &so = s:so_save | let &siso = s:siso_save
 doautoall SessionLoadPost
