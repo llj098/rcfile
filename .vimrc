@@ -259,16 +259,24 @@ set nocompatible
 
 " ctags and cscopes{ 
 	set tags="";
+<<<<<<< HEAD
 	"let td = "/home/liulijin/Source/tags/"
 	let td = $HOME . "/Source/tags/"
+=======
+	let td = "/home/liulijin/Source/tags/"
+>>>>>>> a9e4d66cf24dfba14e9741d5fce7afe6e9320482
 	let tfiles=GetFiles(td)
 	for f in tfiles
 		let t = td . f
 		exe	"set tags+=" .t 
 	endfor
 
+<<<<<<< HEAD
 	let td = $HOME . "/Source/cscopes/"
 	"let td = "/home/liulijin/Source/cscopes/"
+=======
+	let td = "/home/liulijin/Source/cscopes/"
+>>>>>>> a9e4d66cf24dfba14e9741d5fce7afe6e9320482
 	let tfiles=GetFiles(td)
 	for f in tfiles
 		if stridx(f,".po") < 0 && stridx(f,".in") <0 && stridx(f,".files")<0
