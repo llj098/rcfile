@@ -197,9 +197,10 @@ set nocompatible
 	"
 	" Cscope {
 		if has("cscope")
-			cs add mono.out
-			cs add mono.out
-			cs add /home/lliulijin/Source/linux-2.6.36.2/cscope.out
+			cs kill -1
+			"cs add /home/lliulijin/Source/linux-2.6.36.2/cscope.out
+			"cs add /home/liulijin/Source/cscopes/cscope.out
+			cs add /home/liulijin/Source/cscopes/redis
 
 			map <F12> :cs find g <C-R>=expand("<cword>")<CR><CR>
 			map <S-F12> :cs find s <C-R>=expand("<cword>")<CR><CR>
@@ -246,5 +247,37 @@ set nocompatible
 		set lines=99               	" max window
 	endif
 " }
+
+" Functions {
+	function GetFiles(l)
+		let f = system("ls " . string(a:l))
+		let f_list = split(f,'\n')
+
+		return f_list
+	endfunction
+"}
+
+" ctags and cscopes{ 
+	set tags="";
+	"let td = "/home/liulijin/Source/tags/"
+	let td = $HOME . "/Source/tags/"
+	let tfiles=GetFiles(td)
+	for f in tfiles
+		let t = td . f
+		exe	"set tags+=" .t 
+	endfor
+
+	let td = $HOME . "/Source/cscopes/"
+	"let td = "/home/liulijin/Source/cscopes/"
+	let tfiles=GetFiles(td)
+	for f in tfiles
+		if stridx(f,".po") < 0 && stridx(f,".in") <0 && stridx(f,".files")<0
+			let t = td . f
+			exe	"cs add " .t
+		endif
+	endfor
+"}
+
+
 
 

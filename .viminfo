@@ -8,7 +8,7 @@
 # hlsearch on (H) or off (h):
 ~h
 # Last Search Pattern:
-~MSle0~/CT
+~MSle0~/echo
 
 # Last Substitute Search Pattern:
 ~MSle0&ep
@@ -17,11 +17,18 @@
 $
 
 # Command Line History (newest to oldest):
+:q
+:call CleanClose(1)
+:set tags
+:e ~/.vimrc
 :wq
 :w
-:q
+:echo $HOME
+:echo f
+:f
+:let f =GetFiles("~/")
+:e .vimrc
 :e ~/.zshrc
-:set tags
 :tags
 :e redis.c
 :e driver.cs
@@ -29,7 +36,6 @@ $
 :grep -R Main( .
 :e ~/Source/mono/mcs/mcs/
 :e ~/code/test/eval.cs
-:call CleanClose(1)
 :set wrap
 :e ~/Source/mono/mcs/tools/csharp/
 :!gmcs evel.cs
@@ -123,7 +129,6 @@ $
 :e /usr/share/doc/mutt/examples/sample.muttrc.gz
 :e .muttrc
 :e:q
-:e ~/.vimrc
 :e ~/Source/linux-2.6.36.2/net/ipv4/tcp_ipv4.c
 :e tcp.c
 :e ~/code/
@@ -414,6 +419,7 @@ $
 :e README.jay
 
 # Search String History (newest to oldest):
+?/echo
 ?/CT
 ?/CT(
 ? \<slaveofCommand\>
@@ -871,8 +877,8 @@ $
 
 # Registers:
 "0	LINE	0
-	sudo cp -r .bash* ~/rc/
-""1	LINE	0
+		let td = $HOME . "/Source/tags/"
+"1	LINE	0
 	git push
 "2@	LINE	0
 	
@@ -894,22 +900,33 @@ $
 	extern int send_sig_info(int, struct siginfo *, struct task_struct *);
 "k	CHAR	0
 	k
-"-	CHAR	0
-	sh ~/script/syncrc.sh 
+""-	CHAR	0
+	tags
 
 # File marks:
-'0  8  0  ~/script/syncrc.sh
-'1  1  0  ~/script/syncrc.sh
-'2  1  0  ~/.zshrc
-'3  315  8  ~/Source/mono/mcs/mcs/driver.cs
-'4  16  0  ~/code/test/eval.cs
-'5  11  0  ~/code/test/eval.cs
-'6  90  0  ~/Source/mono/mcs/INSTALL.txt
-'7  178  0  ~/.xmonad/xmonad.hs
-'8  174  0  ~/.xmonad/xmonad.hs
-'9  423  0  ~/Source/beansdb-0.5.3/bitcask.c
+'0  1  0  ~/-TabBar-
+'1  271  0  ~/.vimrc
+'2  263  0  ~/rc/.vimrc
+'3  1  0  ~/Source/redis/src/redis
+'4  8  0  ~/script/syncrc.sh
+'5  1  0  ~/script/syncrc.sh
+'6  1  0  ~/.zshrc
+'7  315  8  ~/Source/mono/mcs/mcs/driver.cs
+'8  16  0  ~/code/test/eval.cs
+'9  11  0  ~/code/test/eval.cs
 
 # Jumplist (newest first):
+-'  1  0  ~/-TabBar-
+-'  2  0  ~/-TabBar-
+-'  1  0  ~/.vimrc
+-'  271  0  ~/.vimrc
+-'  263  0  ~/rc/.vimrc
+-'  1  0  ~/rc/-TabBar-
+-'  2  0  ~/rc/-TabBar-
+-'  1  0  ~/rc/.vimrc
+-'  1  0  ~/Source/redis/src/redis
+-'  1  0  ~/Source/redis/src/-TabBar-
+-'  2  0  ~/Source/redis/src/-TabBar-
 -'  8  0  ~/script/syncrc.sh
 -'  1  0  ~/script/-TabBar-
 -'  2  0  ~/script/-TabBar-
@@ -993,20 +1010,64 @@ $
 -'  274  25  ~/Source/redis/src/rdb.c
 -'  292  25  ~/Source/redis/src/rdb.c
 -'  323  25  ~/Source/redis/src/rdb.c
--'  350  25  ~/Source/redis/src/rdb.c
--'  352  25  ~/Source/redis/src/rdb.c
--'  402  8  ~/Source/redis/src/rdb.c
--'  195  4  ~/Source/redis/src/rdb.c
--'  364  7  ~/Source/redis/src/rdb.c
--'  368  14  ~/Source/redis/src/rdb.c
--'  1  0  ~/.zshrc
--'  42  0  ~/.zshrc
--'  506  0  ~/.zshrc
--'  148  13  ~/.zshrc
--'  144  13  ~/.zshrc
--'  392  0  ~/.zshrc
 
 # History of marks within files (newest to oldest):
+
+> ~/.vimrc
+	"	271	0
+	^	270	34
+	.	270	33
+	+	263	0
+	+	262	1
+	+	263	19
+	+	270	0
+	+	271	1
+	+	270	33
+
+> ~/-TabBar-
+	"	1	0
+	.	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+
+> ~/rc/.vimrc
+	"	263	0
+	^	263	8
+	.	263	7
+	+	263	7
+
+> ~/rc/-TabBar-
+	"	1	0
+	.	2	0
+	+	2	0
+
+> ~/Source/redis/src/redis
+	"	1	0
+
+> ~/Source/redis/src/-TabBar-
+	"	1	0
+	.	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
+	+	2	0
 
 > ~/script/syncrc.sh
 	"	8	0
@@ -1053,29 +1114,6 @@ $
 	"	15	0
 	j	556	0
 	m	556	0
-
-> ~/Source/redis/src/-TabBar-
-	"	1	0
-	.	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
 
 > ~/Source/redis/src/redis.c
 	"	1139	49
@@ -1708,123 +1746,3 @@ $
 
 > ~/Source/redis-2.2.4/src/ae_epoll.c
 	"	77	11
-
-> ~/Source/redis-2.2.4/src/tags.c
-	"	1	0
-	.	1	0
-	+	1	22
-	+	1	0
-	+	1	0
-	+	1	0
-
-> ~/Source/redis-2.2.4/src/t_string.c
-	"	78	0
-
-> ~/Source/redis-2.2.4/src/replication.c
-	"	161	0
-	j	502	0
-	k	525	0
-
-> ~/code/tcp_svr_sample.c
-	"	308	8
-	^	460	31
-	.	458	0
-	+	95	0
-	+	446	18
-	+	467	9
-	+	450	0
-	+	466	0
-	+	467	0
-	+	451	0
-	+	466	0
-	+	466	0
-	+	449	1
-	+	450	0
-	+	449	0
-	+	450	66
-	+	448	8
-	+	452	0
-	+	450	4
-	+	460	0
-	+	453	0
-	+	454	0
-	+	455	0
-	+	462	0
-	+	464	0
-	+	460	30
-	+	458	58
-	+	458	0
-
-> ~/code/-TabBar-
-	"	1	0
-	.	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0
-	+	2	0

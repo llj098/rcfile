@@ -1,99 +1,3 @@
-ls
-ls -l
-s
-ls
-man ln
-cd ~
-ls
-mkdir tags
-ls
-cd tags/
-ln -s /home/lliulijin/Source/linux-2.6.36.2/tags linux-tags
-ls
-ls
-ifconfig
-ping 192.168.3.2
-cat /var/log/messages
-cat /var/log/messages | grep timer
-cat /var/log/messages | grep timer:
-cat /var/log/messages > log
-vi log
-lsmod
-lsmod|grep timer
-vim code/
-ifconfig
-scp
-scp code/demo/timer.c code/demo/Makefile root@192.168.3.2
-scp root@192.168.3.2 code/demo/timer.c code/demo/Makefile 
-scp root@192.168.3.2 code/demo/timer.c code/demo/Makefile
-scp root@192.168.3.2 code/demo/timer.c 
-man scp
-scp root@192.168.3.2:code/demo/timer.c 
-man scp 
-scp code/demo/timer.c root@192.168.3.2
-scp code/demo/timer.c root@192.168.3.2:
-scp code/demo/c.sh  root@192.168.3.2:
-sudo apt-get open-ssh
-sudo apt-get install open-ssh
-sudo apt-get install open-client
-sudo apt-get install openssh-client
-sudo apt-get install openssh-server
-netstat -an |grep 22
-ls
-cd code/demo/
-make
-ssh root@192.168.3.2
-ssh root@192.168.3.2
-ls
-mutt
-man mutt
-sudo apt-get install sendmail
-VBoxManage 
-man VBoxManage
-VBoxManage 
-VBoxManage list vms
-vr
-VBoxManage list 
-VBoxManage list runningvms
-VBoxManage startvm
-VBoxManage list vms
-VBoxManage startvm "Arch-3.2"
-VBoxManage list vms
-VBoxManage list 
-VBoxManage list wms
-VBoxManage list vms
-VBoxManage startvm "Arch-3.2"
-VBoxManage controlvm 
-VBoxManage controlvm "Arch-3.2" reset
-VBoxManage controlvm "Arch-3.2" shutdown
-VBoxManage controlvm "Arch-3.2" poweroff
-VM
-set alias
-alias
-alias VM VBoxManage
-vim .bashrc 
-source .bashrc 
-VM startvm "Arch-3.2"
-VM startvm 
-VM list runvms
-VM list runingvms
-VM list running vms
-VM list runningvms
-VMS
-vim .bashrc 
-source .bashrc 
-VM
-vim .bashrc 
-source .bashrc
-VMS
-VMS "Arch-3.2"
-VMC poweroff "Arch-3.2"
-VMC
-VMC "Arch-3.2" poweroff
-VMS Arch-3.2
-ifconfi
-ifconfig
-ssh-keygen -t rsa
 cat /home/lliulijin/.ssh/id_rsa 
 ssh-keygen -t rsa
 ssh root@192.168.3.2
@@ -1998,3 +1902,99 @@ killall zsh
 htop
 kill 7801
 htop
+zsh
+exit
+ssh git@github.com
+cat id_rsa.pub 
+scp id_rsa.pub git@v.fatlj.me:/home/git/llj098.pub 
+cd ..
+ls
+rm -r .git
+rm -rn .git
+man rm
+rm -rf .git
+ls
+git init 
+git add .vim*
+git st
+git add .zsh*
+git add .bash*
+git commit -m 'init'
+git push origin master
+ls
+git st
+git clone  --help
+rm -fr .git
+ls
+git st
+zsh
+git add .vimrc
+git add .vim
+ls
+git st
+git add .bash*
+git st
+git add .zsh*
+git st
+clear
+git st
+git add script/
+git commit -m 'first commit'
+cd ~/.ssh/
+ls
+car id_rsa
+cat id_rsa
+cat id_rsa.pub 
+cp id_rsa* key_backup
+ls
+mkdir key_backup
+cp id_rsa* key_backup
+rm id_rsa*
+ssh-keygen -t rsa -C "llj098@gmail.com"
+gedit id_rsa.pub 
+git push -u origin master 
+cp id_rsa* key_backup
+rm id_rsa*
+ssh-keygen -t rsa -C "llj098@gmail.com"
+cat id_rsa.pub 
+git push -u origin master 
+cat id_rsa.pub 
+git push -u origin master 
+gedit id_rsa.pub 
+git push -u origin master 
+git user
+git st
+cat .gitconfig
+cd ~
+cat .gitconfig 
+git push -u origin master 
+cd ~/.ssh/
+ls
+cp id_rds* key_backup/
+cp id_rsa* key_backup/
+rm id_rsa*
+ls
+cat known_hosts 
+ls
+rm known_hosts 
+ls
+rm authorized_keys 
+ls
+ssh-keygen -t rsa -C "llj098@gmail.com"
+cat id_rsa.pub 
+cd ~
+git push -u origin master 
+ssh git@github.com
+ping github.com
+cd ~/.ssh
+ls
+rm id*
+rm k*
+rm kn*
+ls
+ssh-keygen -t rsa -C "llj098@gmail.com"
+gedit id_rsa.pub 
+ssh git@github.com
+git config --global user.name "llj098"
+ssh git@github.com
+screen 
