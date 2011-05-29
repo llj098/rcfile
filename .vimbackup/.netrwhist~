@@ -1,7 +1,9 @@
 let g:netrw_dirhistmax  =10
-let g:netrw_dirhist_cnt =5
+let g:netrw_dirhist_cnt =7
 let g:netrw_dirhist_1='/media/NTFS/llj098/Code/ADFS/adfs-dev/CommonLibrary/1.Foundation/Rpc/Channel'
 let g:netrw_dirhist_2='/media/NTFS/llj098/Code/ADFS/adfs-dev/CommonLibrary/1.Foundation/Rpc/Channel/Tcp'
 let g:netrw_dirhist_3='/home/lliulijin/code'
 let g:netrw_dirhist_4='/home/lliulijin/.mutt'
 let g:netrw_dirhist_5='/usr/share/doc/offlineimap/examples'
+let g:netrw_dirhist_6='/home/lliulijin/.offlineimap'
+let g:netrw_dirhist_7='/home/lliulijin/Source/redis-2.2.4/src'

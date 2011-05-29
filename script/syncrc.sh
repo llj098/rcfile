@@ -5,5 +5,5 @@ sudo cp -r ~/.git* ~/rc/
 sudo cp -r ~/script/ ~/rc/
 cd ~/rc/
 git add .
-git commit -a -m 'commit'
+git commit -m 'commit'
 git push origin master

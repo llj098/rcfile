@@ -1,0 +1,35 @@
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+# Explicit paths specified without -i nor -o; assuming --only paths...
+# On branch master
+# Your branch and 'origin/master' have diverged,
+# and have 1 and 1 different commit(s) each, respectively.
+#
+# Changes to be committed:
+#   (use "git reset HEAD <file>..." to unstage)
+#
+#	modified:   .vim/.netrwhist
+#	modified:   .vimbackup/.netrwhist~
+#	modified:   .vimbackup/.zshrc~
+#	modified:   .vimbackup/Makefile~
+#	modified:   .vimbackup/syncrc.sh~
+#	modified:   .vimbackup/thread.c~
+#	modified:   .vimperator/info/default/history-command
+#	modified:   .vimperator/info/default/history-search
+#	modified:   .vimperator/info/default/local-marks
+#	modified:   .vimviews/~=+.bashrc=
+#	modified:   .vimviews/~=+.vim=+plugin=+c.vim=
+#	modified:   .vimviews/~=+.xmonad=+xmonad.hs=
+#	modified:   .vimviews/~=+.zshrc=
+#	modified:   .vimviews/~=+Source=+NERD_tree_1=
+#	modified:   .vimviews/~=+Source=+NERD_tree_2=
+#	modified:   .vimviews/~=+Source=+linux-2.6.36.2=+arch=+x86=+boot=+boot.h=
+#	modified:   .vimviews/~=+Source=+nginx-0.9.3=+src=+core=+nginx.c=
+#	modified:   .vimviews/~=+Source=+nginx-0.9.3=+src=+core=+ngx_cycle.c=
+#	modified:   .vimviews/~=+Source=+nginx-0.9.3=+src=+event=+modules=+ngx_epoll_module.c=
+#	modified:   .vimviews/~=+Source=+nginx-0.9.3=+src=+event=+ngx_event.h=
+#	modified:   .vimviews/~=+Source=+nginx-0.9.3=+src=+os=+unix=+ngx_process_cycle.c=
+#	modified:   .vimviews/~=+code=+tcp_svr_sample.c=
+#	modified:   .vimviews/~=+script=+syncrc.sh=
+#

@@ -2,7 +2,6 @@ let s:so_save = &so | let s:siso_save = &siso | set so=0 siso=0
 argglobal
 inoremap <buffer> <silent> ­ =EchoFuncP()
 inoremap <buffer> <silent> ½ =EchoFuncN()
-inoremap <buffer> <silent> ê =EchoFunc()
 vnoremap <buffer> <silent> [" :exe "normal! gv"|call search('\%(^\s*".*\n\)\%(^\s*"\)\@!', "bW")
 nnoremap <buffer> <silent> [" :call search('\%(^\s*".*\n\)\%(^\s*"\)\@!', "bW")
 vnoremap <buffer> <silent> [] m':exe "normal! gv"|call search('^\s*endf*\%[unction]\>', "bW")
@@ -29,16 +28,11 @@ setlocal nocindent
 setlocal cinkeys=0{,0},0),:,0#,!^F,o,O,e
 setlocal cinoptions=
 setlocal cinwords=if,else,while,do,for,switch
-setlocal colorcolumn=
 setlocal comments=sO:\"\ -,mO:\"\ \ ,eO:\"\",:\"
 setlocal commentstring=\"%s
 setlocal complete=.,w,b,u,t,i
-setlocal concealcursor=
-setlocal conceallevel=0
 setlocal completefunc=
 setlocal nocopyindent
-setlocal cryptmethod=
-setlocal nocursorbind
 setlocal nocursorcolumn
 setlocal cursorline
 setlocal define=
@@ -54,7 +48,7 @@ setlocal foldcolumn=0
 setlocal foldenable
 setlocal foldexpr=0
 setlocal foldignore=#
-setlocal foldlevel=2
+setlocal foldlevel=0
 setlocal foldmarker={{{,}}}
 setlocal foldmethod=marker
 setlocal foldminlines=1
@@ -89,7 +83,6 @@ setlocal nopreserveindent
 setlocal nopreviewwindow
 setlocal quoteescape=\\
 setlocal noreadonly
-setlocal norelativenumber
 setlocal norightleft
 setlocal rightleftcmd=search
 setlocal noscrollbind
@@ -112,17 +105,16 @@ setlocal tabstop=2
 setlocal tags=
 setlocal textwidth=78
 setlocal thesaurus=
-setlocal noundofile
 setlocal nowinfixheight
 setlocal nowinfixwidth
 setlocal nowrap
 setlocal wrapmargin=0
-let s:l = 807 - ((16 * winheight(0) + 29) / 59)
+let s:l = 1 - ((0 * winheight(0) + 16) / 33)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-807
-normal! 01l
+1
+normal! 0
 lcd ~/code
 let &so = s:so_save | let &siso = s:siso_save
 doautoall SessionLoadPost
