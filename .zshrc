@@ -277,13 +277,17 @@ ct()
 		echo tags name is : $tagname
 		echo cscope name is : $cscopename
 
-		ctags -R --extra=+fq --c++-kinds=+p --fields=+ials -f $tagname
-		mv $tagname /home/liulijin/Source/tags/
-
+		echo generating the file list
 		dir=$(pwd)
-		find $dir -name "*.*" -print > /home/liulijin/Source/cscopes/$cscopename.files
+		rm -f $HOME/Source/cscopes/$cscopename.files
+		find $dir -name "*.*" -print > $HOME/Source/cscopes/$cscopename.files
 
-		cscope -b -q -R -f /home/liulijin/Source/cscopes/$cscopename -i /home/liulijin/Source/cscopes/$cscopename.files
+		echo generating the tags
+		ctags --extra=+fq --c++-kinds=+p --fields=+ials -L $HOME/Source/cscopes/$cscopename.files  -f $tagname
+		mv $tagname $HOME/Source/tags/
+
+		echo generating the cscopes
+		cscope -b -q -R -f $HOME/Source/cscopes/$cscopename -i $HOME/Source/cscopes/$cscopename.files
 		#mv $cscopename* /home/liulijin/Source/cscopes/
 	else
 		echo input tag name
