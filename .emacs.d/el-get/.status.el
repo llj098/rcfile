@@ -1,1 +1,1 @@
-(:el-get "installed" :vimpulse "installed" :yasnippet "installed" :csharp-mode "required" :htmlize "installed")
+(:el-get "installed" :vimpulse "installed" :git-emacs "installed" :auto-complete "installed" :auto-complete-clang "removed" :emacs-w3m "removed" :txt2tags-mode "installed" :shell-current-directory "installed" :emacschrome "installed" :w3m-extension "removed" :w3m-session "removed" :escreen "installed" :anything "installed" :yasnippet "removed" :ack "installed" :undo-tree "removed")

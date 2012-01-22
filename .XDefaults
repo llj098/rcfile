@@ -1,0 +1,14 @@
+Rxvt*background: black
+Rxvt*foreground: green
+Rxvt*saveLines: 2000
+Rxvt*title: URXVT 
+Rxvt*multibyte_cursor: 1
+Rxvt*meta8: 1
+Rxvt*scrollBar_right: 1
+Rxvt*scrollTtyOutput: 1
+Rxvt*scrollWithBuffer: 1
+Rxvt*cursorBlink:true
+Rxvt*cursorColor:orange
+
+rxvt*transpscrollbar:true
+URxvt.font: xft:dina:size=12

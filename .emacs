@@ -3,6 +3,8 @@
 
 (add-to-list 'load-path "~/.emacs.d/el-get/el-get")
 (add-to-list 'load-path "~/.emacs.d/color-theme")
+(add-to-list 'load-path "~/.emacs.d/plugins")
+(add-to-list 'load-path "~/.emacs.d/emacs-jabber-0.8.90")
 
 (unless (require 'el-get nil t)
   (url-retrieve
@@ -20,20 +22,28 @@
 
 
 ;;ibuffer
-;(global-set-key (kbd "C-x C-b") 'ibuffer)
-;(autoload 'ibuffer "ibuffer" "List buffers." t)
+(global-set-key (kbd "C-x C-b") 'ibuffer)
+(autoload 'ibuffer "ibuffer" "List buffers." t)
+
+(require 'undo-tree)
+(global-undo-tree-mode)
 
 ;;common set
-;(column-number-mode t)
+(column-number-mode t)
+(setq-default c-default-style "linux"
+	      c-basic-offset 4
+	      indent-tabs-mode t)
 ;(scroll-bar-mode nil)
 ;(set-scroll-bar-mode nil)  
 ;(require 'wb-line-number)
 ;(wb-line-number-enable)
-;(require 'vimpulse)
-;(require 'undo-tree)
 
-;(require 'ido)
-;(ido-mode t)
+
+(add-to-list 'load-path "~/.emacs.d/plugins")
+(require 'yasnippet-bundle)
+
+(require 'ido)
+(ido-mode t)
 
 ;;some bars
 ;(require 'sr-speedbar)
@@ -60,12 +70,13 @@
 (global-set-key (kbd "C-SPC") 'nil)
 
 
-;(require 'jabber-autoloads)
-;(setq jabber-account-list
-      ;'(("llj098@gmail.com"
-         ;(:network-server . "talk.google.com")
-         ;(:connection-type . ssl))))
-;
+
+(require 'jabber-autoloads)
+(setq jabber-account-list
+      '(("llj098@gmail.com"
+         (:network-server . "talk.google.com")
+         (:connection-type . ssl))))
+
 ;(require 'scala-mode-auto)
 ;(require 'go-mode)
 ;

@@ -61,10 +61,6 @@ setopt extendedglob
 zstyle ':completion:*:descriptions' format '%U%B%d%b%u'
 zstyle ':completion:*:warnings' format '%BSorry, no matches for: %d%b'
 
-HISTFILE=~/.zsh-histfile
-HISTSIZE=1000
-SAVEHIST=1000
-
 #Aliases
 ##ls, the common ones I use a lot shortened for rapid fire usage
 alias ls='ls --color' #I like color
@@ -78,12 +74,6 @@ alias .='cd ../'
 alias ..='cd ../../'
 alias ...='cd ../../../'
 alias ....='cd ../../../../'
-
-# SSH aliases - short cuts to ssh to a host
-alias -g shost='ssh -p 9999 user@host.com'
-
-# Screen aliases - add a new screen , or entire session, name it, then ssh to the host
-alias sshost='screen -t HOST shost'
 
 
 # My .zshrc file
@@ -240,11 +230,6 @@ alias -g E='2> /dev/null'
 
 # SSH aliases
 alias 'sshb=ssh matt@blissett.me.uk'
-
-# SSH to shell[1234].doc.ic.ac.uk at random
-sshdoc() {
-	ssh mrb04@shell$(($RANDOM % 4 + 1)).doc.ic.ac.uk $*
-}
 
 # Automatically background processes (no output to terminal etc)
 alias 'z=echo $RANDOM > /dev/null; zz'
@@ -538,3 +523,11 @@ plot () {
 				# (No idea if this is needed any more)
 				source $HOME/.zshenv
 
+				case $TERM in
+					xterm*|rxvt*|screen*)
+						precmd() { print -Pn "\e]0;%m:%~\a" }
+						preexec () { print -Pn "\e]0;$1\a" }
+						;;
+				esac
+#emacs
+alias 'enw=emacs -nw'
