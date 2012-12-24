@@ -1,48 +1,57 @@
-(let ((default-directory "~/.emacs.d/site-lisp"))
-    (normal-top-level-add-subdirs-to-load-path)
+(setq c-default-style "linux")
+(load-theme 'wombat t)
 
-(add-to-list 'load-path "~/.emacs.d/el-get/el-get")
-(add-to-list 'load-path "~/.emacs.d/color-theme")
-(add-to-list 'load-path "~/.emacs.d/plugins")
-(add-to-list 'load-path "~/.emacs.d/emacs-jabber-0.8.90")
+;(let ((default-directory "~/.emacs.d/site-lisp"))
+;    (normal-top-level-add-subdirs-to-load-path)
 
-(unless (require 'el-get nil t)
-  (url-retrieve
-   "https://github.com/dimitri/el-get/raw/master/el-get-install.el"
-   (lambda (s)
-     (end-of-buffer)
-     (eval-print-last-sexp))))
+;(add-to-list 'load-path "~/.emacs.d/el-get/el-get")
+;(add-to-list 'load-path "~/.emacs.d/color-theme")
 
-(el-get 'sync)
+;(unless (require 'el-get nil t)
+;  (url-retrieve
+;   "https://github.com/dimitri/el-get/raw/master/el-get-install.el"
+;   (lambda (s)
+;     (end-of-buffer)
+;     (eval-print-last-sexp))))
 
-(require 'color-theme)
-(color-theme-initialize)
-(color-theme-molokai)
-(set-default-font "Monospace-11")
+;(el-get 'sync)
+;
+;(require 'color-theme)
+;(color-theme-initialize)
+;(color-theme-monokai)
+(set-default-font "Monospace-10")
+
+;auto refresh buffer
+;;(global-auto-revert-mode t)
+
+;slime
+;(setq inferior-lisp-program "/path/to/lisp-executable")
+;(add-to-list 'load-path "/usr/share/emacs/site-lisp/slime/")
+;(require 'slime)
+;(slime-setup)
+
+;package
+;(require 'package)
+;(add-to-list 'package-archives
+;	     '("marmalade" . "http://marmalade-repo.org/packages/"))
+;(package-initialize)
 
 
-;;ibuffer
-(global-set-key (kbd "C-x C-b") 'ibuffer)
-(autoload 'ibuffer "ibuffer" "List buffers." t)
 
-(require 'undo-tree)
-(global-undo-tree-mode)
+;;Ibuffer
+;(global-set-key (kbd "C-x C-b") 'ibuffer)
+;(autoload 'ibuffer "ibuffer" "List buffers." t)
 
 ;;common set
-(column-number-mode t)
-(setq-default c-default-style "linux"
-	      c-basic-offset 4
-	      indent-tabs-mode t)
+;(column-number-mode t)
 ;(scroll-bar-mode nil)
 ;(set-scroll-bar-mode nil)  
 ;(require 'wb-line-number)
 ;(wb-line-number-enable)
+;(require 'vimpulse)
+;(require 'undo-tree)
 
-
-(add-to-list 'load-path "~/.emacs.d/plugins")
-(require 'yasnippet-bundle)
-
-(require 'ido)
+;(require 'ido)
 (ido-mode t)
 
 ;;some bars
@@ -67,16 +76,15 @@
 ;(global-set-key "\C-ceb" 'evernote-browser)
 
 ;CHINESE INPUT
-(global-set-key (kbd "C-SPC") 'nil)
+;(global-set-key (kbd "C-SPC") 'nil)
 
 
-
-(require 'jabber-autoloads)
-(setq jabber-account-list
-      '(("llj098@gmail.com"
-         (:network-server . "talk.google.com")
-         (:connection-type . ssl))))
-
+;(require 'jabber-autoloads)
+;(setq jabber-account-list
+      ;'(("llj098@gmail.com"
+         ;(:network-server . "talk.google.com")
+         ;(:connection-type . ssl))))
+;
 ;(require 'scala-mode-auto)
 ;(require 'go-mode)
 ;
@@ -102,4 +110,4 @@
   ;; If there is more than one, they won't work right.
  ;)
 ;e
-)
+;)

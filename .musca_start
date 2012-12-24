@@ -1,0 +1,14 @@
+manage off trayer
+manage off Conky
+
+set border_focus Orange
+set window_open_frame empty
+
+bind off Mod4+t
+bind on Mod4+t exec terminator
+
+bind on Mod4+1 use 0
+bind on Mod4+2 use 1
+bind on Mod4+3 use 2
+bind on Mod4+4 use 3
+bind on Mod4+5 use 4
